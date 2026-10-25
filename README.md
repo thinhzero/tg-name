@@ -30,7 +30,9 @@ python -m pip install -r requirements.txt
 Nếu Ubuntu/Debian báo thiếu `venv`, cài gói `python3-venv` rồi thử lại.
 Các ví dụ terminal còn lại giả sử bạn đang ở thư mục `tg-name` và đã kích hoạt `.venv`.
 
-### Bước 2 — Cấu hình và đăng nhập
+### Bước 2 — Chọn cách cấu hình và đăng nhập
+
+**Cách A — Cài trực tiếp ở terminal** (không bắt buộc có Helper Bot):
 
 ```bash
 python setup.py
@@ -60,6 +62,43 @@ python name.py
 
 **Chỉ chạy một bản bot cho cùng tài khoản/session.** Không mở thêm `name.py` nếu wizard
 hoặc PM2 đã chạy bot. Nhấn `Ctrl+C` để dừng bản đang chạy ở terminal.
+
+**Cách B — Chỉ điền BOT_TOKEN + ADMIN_ID, rồi cài toàn bộ qua chat bot:**
+
+Không cần điền API_ID/API_HASH hoặc đăng nhập tài khoản ở terminal trước. Sau khi cài
+thư viện ở bước 1, chọn **10** trong `python setup.py`: nhập BOT_TOKEN và ADMIN_ID,
+wizard sẽ lưu `.env` và chạy bot ngay. Hoặc tự chuẩn bị `.env` rồi chạy:
+
+```bash
+cp -n .env.example .env
+nano .env
+python name.py
+```
+
+Trong `.env`, **chỉ điền hai dòng `BOT_TOKEN=` và `ADMIN_ID=` bằng giá trị thật của bạn**.
+Để `API_ID=`, `API_HASH=`, `SESSION_STRING=` trống. `cp -n` không ghi đè `.env` đã có;
+nếu đang dùng bản cũ đã có API/session thì không cần xóa chúng để dùng `/setup`.
+
+Sau khi tiến trình đã chạy:
+
+1. Dùng đúng tài khoản có ID đã điền ở `ADMIN_ID`, mở chat riêng với bot và nhấn **Start**.
+   Bot đọc ID từ `.env`, **không nhận người nhắn đầu tiên làm admin**. Nếu chưa nhấn Start,
+   Telegram chưa cho bot tự nhắn bạn, nên terminal sẽ nhắc mở bot.
+2. Bấm **Nhập API_ID / API_HASH**. Bot lần lượt hỏi API_ID và API_HASH riêng từ
+   https://my.telegram.org/apps, kiểm tra rồi lưu `.env`. Không gửi BOT_TOKEN vào chat.
+3. Bot tự chuyển sang màn hình đầy đủ, **không cần chạy lại ở terminal**. Bấm
+   **Đăng nhập Telegram**, nhập số điện thoại, mã xác nhận và mật khẩu 2FA nếu có.
+4. Session tự lưu, bot tự chạy cập nhật profile sau khi đăng nhập. Chọn các nút
+   **Tên hiển thị**, **Múi giờ**, **Mẫu tên / Bio** để tùy chỉnh tiếp.
+5. Dùng `/setup` hoặc nút **Cài đặt từng bước** để mở lại hướng dẫn, `/cancel` để hủy
+   thao tác nhập. `ADMIN_ID` không bị đổi sang ID tài khoản bạn đăng nhập.
+
+Ở bước thiếu API, bot dùng **Telegram Bot API** chỉ bằng token; sau khi có API riêng mới
+khởi chạy Helper Bot/Userbot bằng Telethon. Không cần key công khai ghi cứng.
+Bot cố xóa tin nhắn chứa API hash, OTP và 2FA sau khi xử lý; việc xóa có thể thất bại do
+quyền/mạng và không thay thế bảo mật tài khoản. Chỉ dùng bot do chính bạn vận hành.
+Nếu bot đã gắn webhook ở dịch vụ khác, hãy dừng dịch vụ/gỡ webhook đó trước; không chạy
+nhiều tiến trình cùng token.
 
 ### Bước 3 — Kiểm tra trên Telegram
 
@@ -130,6 +169,7 @@ Helper Bot chỉ nhận lệnh trong **chat riêng**, từ `ADMIN_ID` đã cấu
 | Mục đích | Userbot | Helper Bot |
 | --- | --- | --- |
 | Hướng dẫn | `.help` | `/help` |
+| Wizard cài đặt qua nút bấm | — | `/setup` |
 | Trạng thái | `.status` | `/status` hoặc `/start` |
 | Xem trước tên và bio | `.preview` | `/preview` |
 | Cập nhật tên/bio ngay | `.update` | `/update` |
@@ -183,11 +223,11 @@ Không ghi key/token vào lệnh shell hoặc gửi chúng lên GitHub.
 
 | Biến | Bắt buộc? / mặc định khi trống |
 | --- | --- |
-| `API_ID`, `API_HASH` | Bắt buộc, lấy riêng tại my.telegram.org/apps |
+| `API_ID`, `API_HASH` | Bắt buộc cho Userbot; có thể nhập qua chat sau khi bot khởi chạy bằng token + admin |
 | `SESSION_STRING` | Wizard tự lưu sau khi đăng nhập; cũng hỗ trợ file session cục bộ |
 | `SESSION_NAME` | `bot` — dùng khi đăng nhập bằng file session |
 | `BOT_TOKEN` | Tùy chọn; để trống thì chỉ chạy Userbot |
-| `ADMIN_ID` | Bắt buộc khi dùng Helper Bot; ID số của chính bạn |
+| `ADMIN_ID` | Bắt buộc khi dùng Helper Bot; bot chỉ nhận cấu hình từ ID số này, không tự đổi sau đăng nhập |
 | `BASE_NAME` | Tên của bạn; mặc định là chữ `tên` nếu chưa đặt |
 | `TIMEZONE`, `LANGUAGE` | `Asia/Ho_Chi_Minh`, `vi` |
 | `NAME_FORMAT` | `{base_name} \| HH:mm - DD/MM \| {gmt} \| {random}` |
@@ -233,7 +273,7 @@ Repo này công khai nên chức năng cập nhật **không cần GitHub token*
 
 | Triệu chứng | Cách xử lý |
 | --- | --- |
-| Thiếu API_ID/API_HASH | Chạy `python setup.py`, dùng API riêng, không dùng key cũ có sẵn trên mạng |
+| Thiếu API_ID/API_HASH | Nếu đã có token + admin: mở bot và /start để nhập API. Nếu không dùng Helper Bot: cấu hình bằng setup.py |
 | Chưa đăng nhập / session hết hạn | Chạy lại bước đăng nhập trong `setup.py` |
 | Helper Bot báo thiếu ADMIN_ID | Điền ID số của bạn; bot không cấp admin cho người nhắn đầu tiên |
 | `.status` không trả lời | Dùng chính tài khoản đã đăng nhập, kiểm tra tiến trình còn chạy |

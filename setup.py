@@ -301,6 +301,22 @@ def configure_helper_bot(config: dict) -> dict:
 
     return {"BOT_TOKEN": bot_token, "ADMIN_ID": admin_id}
 
+def run_bot_first_setup(config: dict):
+    """Chỉ nhận token/admin ở terminal; API và đăng nhập làm trong chat bot."""
+    print(f"\n{BOLD}{CYAN}=== CÀI ĐẶT QUA TELEGRAM ==={RESET}")
+    print("Chỉ cần BOT_TOKEN và ADMIN_ID. Không nhập API_ID/API_HASH ở terminal.")
+    token = getpass("BOT_TOKEN (ẩn; Enter giữ token đã lưu): ").strip() or config.get("BOT_TOKEN", "")
+    while not token:
+        token = getpass("Cần BOT_TOKEN từ @BotFather (ẩn): ").strip()
+    admin_id = input(f"ADMIN_ID của chính bạn [{config.get('ADMIN_ID') or 'chưa có'}]: ").strip() or config.get("ADMIN_ID", "")
+    while not admin_id.isdigit() or int(admin_id) <= 0:
+        admin_id = input("ADMIN_ID phải là ID số dương của chính bạn: ").strip()
+    save_env({"BOT_TOKEN": token, "ADMIN_ID": admin_id})
+    print("Mở chat riêng với bot, nhấn Start. Bot chỉ nhận cấu hình từ ADMIN_ID đã lưu.")
+    print("Nhập API riêng và đăng nhập Telegram bằng các nút trong chat; Ctrl+C để dừng.")
+    project_dir = os.path.dirname(os.path.abspath(__file__))
+    subprocess.call([sys.executable, os.path.join(project_dir, "name.py")], cwd=project_dir)
+
 def configure_weather(config: dict) -> dict:
     print(f"\n{BOLD}{CYAN}=== 3. CẤU HÌNH THỜI TIẾT (OPENWEATHERMAP) ==={RESET}")
     print("Đăng ký API Key miễn phí tại: https://home.openweathermap.org/api_keys")
@@ -497,10 +513,11 @@ def main():
         print("  7. Kiểm tra và cài đặt thư viện phụ thuộc (pip install)")
         print("  8. Xem trước (Preview) Name & Bio hiện tại")
         print("  9. Khởi động hệ thống (Chạy trực tiếp hoặc qua PM2)")
+        print("  10. Cài qua Telegram (chỉ nhập BOT_TOKEN + ADMIN_ID, rồi chạy bot)")
         print("  0. Thoát")
         print(f"{CYAN}------------------------------------------------------------{RESET}")
 
-        choice = input(f"{YELLOW}Nhập lựa chọn (0-9): {RESET}").strip()
+        choice = input(f"{YELLOW}Nhập lựa chọn (0-10): {RESET}").strip()
 
         if choice == "1":
             run_wizard()
@@ -525,6 +542,9 @@ def main():
             preview_profile(config)
         elif choice == "9":
             ask_start_bot()
+        elif choice == "10":
+            check_dependencies()
+            run_bot_first_setup(config)
         elif choice in ("0", "q", "exit"):
             print(f"{GREEN}Tạm biệt!{RESET}")
             break

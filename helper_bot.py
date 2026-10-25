@@ -36,9 +36,64 @@ from profile_engine import engine, generate_preview, get_lastfm_track
 from i18n import get_text
 from bot_updater import bot_updater, run_with_restart, UpdateError
 from random_names import random_names
+from bot_setup import run_api_setup
 
 # Lưu trạng thái đàm thoại của user: user_id -> {"action": ..., "data": ...}
 user_sessions = {}
+
+async def cancel_user_dialog(user_id):
+    sess = user_sessions.pop(user_id, None)
+    if sess and "temp_client" in sess:
+        try:
+            await sess["temp_client"].disconnect()
+        except Exception:
+            pass
+
+
+def get_setup_keyboard(lang=None):
+    lang = lang or state.config.get("LANGUAGE", "vi")
+    en = lang == "en"
+    return [
+        [Button.inline("1️⃣ API_ID / API_HASH", data="setup_api_creds")],
+        [Button.inline("2️⃣ Telegram login" if en else "2️⃣ Đăng nhập Telegram", data="setup_login")],
+        [Button.inline("3️⃣ Display name" if en else "3️⃣ Tên hiển thị", data="setup_name"), Button.inline("🕒 Timezone" if en else "🕒 Múi giờ", data="setup_timezone")],
+        [Button.inline("🎨 Name / Bio format" if en else "🎨 Mẫu tên / Bio", data="setup_format")],
+        [Button.inline("🌤 City" if en else "🌤 Thành phố", data="setup_city"), Button.inline("🌐 Language" if en else "🌐 Ngôn ngữ", data="menu_language")],
+        [Button.inline("▶️ Start / Stop" if en else "▶️ Chạy / Dừng", data="toggle_engine"), Button.inline("⚙️ Other settings" if en else "⚙️ Cài đặt khác", data="menu_settings")],
+        [Button.inline("🏠 Dashboard" if en else "🏠 Bảng điều khiển", data="main_menu")],
+    ]
+
+
+def format_setup_guide(lang=None):
+    lang = lang or state.config.get("LANGUAGE", "vi")
+    api_ok = bool(state.config.get("API_ID") and state.config.get("API_HASH"))
+    login_ok = bool(state.config.get("SESSION_STRING") or engine.is_running)
+    name = escape(state.config.get("BASE_NAME", ""))
+    timezone = escape(state.config.get("TIMEZONE", ""))
+    if lang == "en":
+        return (
+            "🛠 <b>SET UP YOUR USERBOT</b>\n\n"
+            f"{'✅' if api_ok else '⬜'} 1. Your Telegram API credentials\n"
+            f"{'✅' if login_ok else '⬜'} 2. Telegram account login\n"
+            f"• Display name: <code>{name}</code>\n• Timezone: <code>{timezone}</code>\n\n"
+            "Choose <b>Telegram login</b>, then send your phone number, login code and 2FA password if required. "
+            "The session is saved automatically; ADMIN_ID stays the value from .env.\n"
+            "Next choose your name, timezone and format with the buttons.\n\n"
+            "API hash, login code and password messages are deleted on a best-effort basis. "
+            "Only log in to this bot on a machine you control. Use /cancel to cancel, /setup to reopen this guide."
+        )
+    return (
+        "🛠 <b>CÀI ĐẶT USERBOT CỦA BẠN</b>\n\n"
+        f"{'✅' if api_ok else '⬜'} 1. API Telegram riêng\n"
+        f"{'✅' if login_ok else '⬜'} 2. Đăng nhập tài khoản Telegram\n"
+        f"• Tên cố định: <code>{name}</code>\n• Múi giờ: <code>{timezone}</code>\n\n"
+        "Bấm <b>Đăng nhập Telegram</b>, nhập số điện thoại, mã xác nhận và mật khẩu 2FA nếu có. "
+        "Bot tự lưu session; ADMIN_ID vẫn giữ đúng giá trị trong .env.\n"
+        "Sau đó chọn tên, múi giờ và mẫu hiển thị bằng các nút bên dưới.\n\n"
+        "Bot cố xóa tin nhắn API hash, mã đăng nhập và mật khẩu sau khi xử lý. "
+        "Chỉ đăng nhập vào bot chạy trên máy bạn kiểm soát. /cancel để hủy, /setup để mở lại hướng dẫn."
+    )
+
 
 def is_admin(user_id: int) -> bool:
     """Kiểm tra quyền truy cập của Admin"""
@@ -122,7 +177,8 @@ def get_main_keyboard(lang: str = None):
         [Button.inline(get_text("btn_preview_bio", lang), data="preview_bio"), Button.inline(get_text("btn_weather_card", lang), data="weather_card")],
         [run_btn, pause_btn],
         [Button.inline(get_text("btn_settings", lang), data="menu_settings"), Button.inline(get_text("btn_language", lang), data="menu_language")],
-        [Button.inline(get_text("btn_status", lang), data="status"), Button.inline(get_text("btn_help", lang), data="help")]
+        [Button.inline(get_text("btn_status", lang), data="status"), Button.inline(get_text("btn_help", lang), data="help")],
+        [Button.inline("🛠 Setup wizard" if lang == "en" else "🛠 Cài đặt từng bước", data="menu_setup")]
     ]
 
 def get_settings_keyboard(lang: str = None):
@@ -443,7 +499,7 @@ def format_help(lang="vi", helper=False):
         f"<code>{p}preview</code>"
     )
     if lang == "en":
-        where = "Send one command per message in this private bot chat." if helper else "Send one command per message from your own account in Saved Messages."
+        where = "Send one command per message in this private bot chat. Use /setup for account login and setup buttons." if helper else "Send one command per message from your own account in Saved Messages."
         return (
             f"📖 <b>QUICK START</b>\n{where}\n\n"
             f"<b>1. Name + time + GMT + random</b>\n{example}\n"
@@ -464,7 +520,7 @@ def format_help(lang="vi", helper=False):
             "Setup and troubleshooting: https://github.com/thinhzero/tg-name#readme\n"
             "Never share .env, sessions, OTP or 2FA passwords."
         )
-    where = "Gửi từng lệnh riêng trong chat riêng với bot này." if helper else "Tự gửi từng lệnh riêng trong Saved Messages bằng tài khoản đã đăng nhập."
+    where = "Gửi từng lệnh riêng trong chat riêng với bot này. /setup mở nút đăng nhập và cài đặt." if helper else "Tự gửi từng lệnh riêng trong Saved Messages bằng tài khoản đã đăng nhập."
     return (
         f"📖 <b>HƯỚNG DẪN NHANH</b>\n{where}\n\n"
         f"<b>1. Tên + giờ + GMT + random</b>\n{example}\n"
@@ -632,22 +688,27 @@ def register_bot_handlers(bot_client: TelegramClient):
     @bot_client.on(events.NewMessage(pattern=r"^/cancel$"))
     async def cancel_cmd(event):
         if not is_admin(event.sender_id): return
-        sess = user_sessions.pop(event.sender_id, None)
-        if sess and "temp_client" in sess:
-            try:
-                await sess["temp_client"].disconnect()
-            except Exception:
-                pass
+        await cancel_user_dialog(event.sender_id)
         await event.reply("❌ <b>Đã hủy thao tác hiện tại!</b>", parse_mode="html", buttons=get_main_keyboard())
 
-    @bot_client.on(events.NewMessage(pattern=r"^/start$"))
+    @bot_client.on(events.NewMessage(pattern=r"^/start(?:@\w+)?(?:\s+\S+)?\s*$"))
     async def start_cmd(event):
         if not is_admin(event.sender_id):
             await event.reply("⛔ <b>Bạn không có quyền sử dụng bot này!</b>", parse_mode="html")
             return
-        user_sessions.pop(event.sender_id, None)
+        await cancel_user_dialog(event.sender_id)
         lang = state.config.get("LANGUAGE", "vi")
-        await event.reply(format_dashboard(lang), parse_mode="html", buttons=get_main_keyboard(lang))
+        if not state.config.get("SESSION_STRING") and not engine.is_running:
+            await event.reply(format_setup_guide(lang), parse_mode="html", buttons=get_setup_keyboard(lang))
+        else:
+            await event.reply(format_dashboard(lang), parse_mode="html", buttons=get_main_keyboard(lang))
+
+    @bot_client.on(events.NewMessage(pattern=r"^/setup(?:@\w+)?\s*$"))
+    async def setup_cmd(event):
+        if not is_admin(event.sender_id): return
+        await cancel_user_dialog(event.sender_id)
+        lang = state.config.get("LANGUAGE", "vi")
+        await event.reply(format_setup_guide(lang), parse_mode="html", buttons=get_setup_keyboard(lang))
 
     @bot_client.on(events.NewMessage(pattern=r"^/(?:lang|language)(?:\s+(.*))?$"))
     async def lang_cmd(event):
@@ -675,6 +736,7 @@ def register_bot_handlers(bot_client: TelegramClient):
     @bot_client.on(events.NewMessage(pattern=r"^/login$"))
     async def login_cmd(event):
         if not is_admin(event.sender_id): return
+        await cancel_user_dialog(event.sender_id)
         user_sessions[event.sender_id] = {"action": "login_wait_phone"}
         msg = (
             "📱 <b>ĐĂNG NHẬP TELEGRAM USERBOT</b>\n"
@@ -955,8 +1017,20 @@ def register_bot_handlers(bot_client: TelegramClient):
     @bot_client.on(events.NewMessage)
     async def user_input_handler(event):
         if not is_admin(event.sender_id): return
+        action = user_sessions.get(event.sender_id, {}).get("action")
+        try:
+            await _user_input_handler_impl(event)
+        finally:
+            if action in ("input_api_hash", "input_weather_api", "login_wait_phone", "login_wait_code", "login_wait_password"):
+                try:
+                    await event.delete()
+                except Exception:
+                    pass
+
+    async def _user_input_handler_impl(event):
+        if not is_admin(event.sender_id): return
         if event.raw_text.strip() == "/cancel": return
-        if re.match(r"^/(?:updaterandom|lsrandom|rmrandom|help|updatecheck)(?:@\w+)?(?:\s|$)", event.raw_text.strip()): return
+        if re.match(r"^/(?:updaterandom|lsrandom|rmrandom|help|updatecheck|start|setup|login)(?:@\w+)?(?:\s|$)", event.raw_text.strip()): return
 
         sess = user_sessions.get(event.sender_id)
         if not sess: return
@@ -1059,7 +1133,7 @@ def register_bot_handlers(bot_client: TelegramClient):
 
         # 5. Đổi API_ID & HASH
         elif action == "input_api_id":
-            if not text.isdigit():
+            if not text.isdigit() or not 0 < int(text) <= 2147483647:
                 warn = "⚠️ <b>API_ID must be digits.</b> Please re-enter (or /cancel):" if lang == "en" else "⚠️ <b>API_ID phải là chữ số.</b> Vui lòng nhập lại (hoặc /cancel):"
                 await event.reply(warn, parse_mode="html")
                 return
@@ -1069,6 +1143,9 @@ def register_bot_handlers(bot_client: TelegramClient):
             await event.reply(prompt, parse_mode="html", buttons=get_cancel_keyboard(lang))
 
         elif action == "input_api_hash":
+            if not re.fullmatch(r"[0-9a-fA-F]{32}", text):
+                await event.reply("⚠️ API_HASH cần đúng 32 ký tự hex từ my.telegram.org/apps. Nhập lại hoặc /cancel.", parse_mode="html")
+                return
             api_id = sess.get("api_id")
             user_sessions.pop(event.sender_id, None)
             state.update_config({"API_ID": api_id, "API_HASH": text})
@@ -1129,10 +1206,10 @@ def register_bot_handlers(bot_client: TelegramClient):
 
             try:
                 temp_client = TelegramClient(StringSession(), api_id, api_hash)
+                sess["temp_client"] = temp_client
                 await temp_client.connect()
                 send_result = await temp_client.send_code_request(phone)
 
-                sess["temp_client"] = temp_client
                 sess["phone"] = phone
                 sess["phone_code_hash"] = send_result.phone_code_hash
                 sess["action"] = "login_wait_code"
@@ -1146,9 +1223,9 @@ def register_bot_handlers(bot_client: TelegramClient):
                     buttons=get_cancel_keyboard()
                 )
             except Exception as e:
-                user_sessions.pop(event.sender_id, None)
+                await cancel_user_dialog(event.sender_id)
                 await msg_wait.delete()
-                await event.reply(f"❌ <b>Không thể gửi mã OTP:</b> {e}\n\nVui lòng thử lại sau.", parse_mode="html", buttons=get_settings_keyboard())
+                await event.reply(f"❌ <b>Không thể gửi mã OTP:</b> {type(e).__name__}\n\nVui lòng thử lại sau.", parse_mode="html", buttons=get_settings_keyboard())
 
         elif action == "login_wait_code":
             otp_code = text.replace(" ", "").replace("-", "")
@@ -1167,17 +1244,17 @@ def register_bot_handlers(bot_client: TelegramClient):
                 user_sessions.pop(event.sender_id, None)
 
                 # Lưu vào .env
-                state.update_config({"SESSION_STRING": session_string, "ADMIN_ID": str(me.id)})
+                state.update_config({"SESSION_STRING": session_string})
                 await msg_verifying.delete()
 
                 success_msg = (
                     f"🎉 <b>ĐĂNG NHẬP THÀNH CÔNG!</b>\n"
                     f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
-                    f"• <b>Tên tài khoản:</b> {me.first_name} {me.last_name or ''}\n"
+                    f"• <b>Tên tài khoản:</b> {escape(me.first_name or '')} {escape(me.last_name or '')}\n"
                     f"• <b>Username:</b> @{me.username or 'Không có'}\n"
                     f"• <b>ID:</b> <code>{me.id}</code>\n\n"
                     f"✔ Đã tự động lưu <b>SESSION_STRING</b> vào file <code>.env</code>!\n"
-                    f"Bạn có thể bấm <b>▶️ Chạy Updater</b> bên dưới để bắt đầu tự động đổi tên & bio ngay."
+                    f"Bot sẽ tự chạy cập nhật profile; bạn có thể dùng <b>/setup</b> để chọn tên, múi giờ và định dạng."
                 )
                 await event.reply(success_msg, parse_mode="html", buttons=get_main_keyboard())
 
@@ -1197,13 +1274,13 @@ def register_bot_handlers(bot_client: TelegramClient):
                 )
             except (PhoneCodeInvalidError, PhoneCodeExpiredError) as e:
                 await msg_verifying.delete()
-                await event.reply(f"⚠️ <b>Mã OTP không chính xác hoặc đã hết hạn ({e})!</b>\nVui lòng nhập lại mã:", parse_mode="html", buttons=get_cancel_keyboard())
+                await event.reply(f"⚠️ <b>Mã OTP không chính xác hoặc đã hết hạn ({type(e).__name__})!</b>\nVui lòng nhập lại mã hoặc hủy để xin mã mới:", parse_mode="html", buttons=get_cancel_keyboard())
             except Exception as e:
                 user_sessions.pop(event.sender_id, None)
                 if temp_client and temp_client.is_connected():
                     await temp_client.disconnect()
                 await msg_verifying.delete()
-                await event.reply(f"❌ <b>Lỗi đăng nhập:</b> {e}", parse_mode="html", buttons=get_settings_keyboard())
+                await event.reply(f"❌ <b>Lỗi đăng nhập:</b> {type(e).__name__}", parse_mode="html", buttons=get_settings_keyboard())
 
         elif action == "login_wait_password":
             temp_client = sess.get("temp_client")
@@ -1218,13 +1295,13 @@ def register_bot_handlers(bot_client: TelegramClient):
                 user_sessions.pop(event.sender_id, None)
 
                 # Lưu vào .env
-                state.update_config({"SESSION_STRING": session_string, "ADMIN_ID": str(me.id)})
+                state.update_config({"SESSION_STRING": session_string})
                 await msg_pwd.delete()
 
                 success_msg = (
                     f"🎉 <b>ĐĂNG NHẬP 2FA THÀNH CÔNG!</b>\n"
                     f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
-                    f"• <b>Tên tài khoản:</b> {me.first_name} {me.last_name or ''}\n"
+                    f"• <b>Tên tài khoản:</b> {escape(me.first_name or '')} {escape(me.last_name or '')}\n"
                     f"• <b>Username:</b> @{me.username or 'Không có'}\n"
                     f"• <b>ID:</b> <code>{me.id}</code>\n\n"
                     f"✔ Đã tự động lưu <b>SESSION_STRING</b> vào file <code>.env</code>!"
@@ -1236,7 +1313,7 @@ def register_bot_handlers(bot_client: TelegramClient):
 
             except Exception as e:
                 await msg_pwd.delete()
-                await event.reply(f"⚠️ <b>Mật khẩu 2FA không đúng ({e})!</b>\nVui lòng nhập lại mật khẩu (hoặc bấm Hủy bỏ):", parse_mode="html", buttons=get_cancel_keyboard())
+                await event.reply(f"⚠️ <b>Chưa hoàn tất đăng nhập 2FA ({type(e).__name__})!</b>\nKiểm tra mật khẩu rồi thử lại (hoặc bấm Hủy bỏ):", parse_mode="html", buttons=get_cancel_keyboard())
 
     # ========================================================
     # XỬ LÝ NÚT BẤM (CALLBACK QUERIES)
@@ -1260,6 +1337,10 @@ def register_bot_handlers(bot_client: TelegramClient):
 
         data = event.data.decode("utf-8")
         lang = state.config.get("LANGUAGE", "vi")
+        if data.startswith("bootstrap_"):
+            data = "menu_setup"
+        if data.startswith(("setup_", "menu_")) or data == "main_menu":
+            await cancel_user_dialog(event.sender_id)
 
         # 1. Hủy thao tác
         if data == "cancel_action":
@@ -1273,6 +1354,10 @@ def register_bot_handlers(bot_client: TelegramClient):
             await event.answer("Cancelled." if lang == "en" else "Đã hủy thao tác.")
 
         # 2. Điều hướng Menu
+        elif data == "menu_setup":
+            await event.edit(format_setup_guide(lang), parse_mode="html", buttons=get_setup_keyboard(lang))
+            await event.answer()
+
         elif data == "main_menu":
             user_sessions.pop(event.sender_id, None)
             await event.edit(format_dashboard(lang), parse_mode="html", buttons=get_main_keyboard(lang))
@@ -1651,13 +1736,21 @@ async def run_standalone_bot():
         print("Vui lòng cấu hình BOT_TOKEN (lấy từ @BotFather) để khởi chạy Helper Bot.")
         return
 
-    if api_id <= 0 or not api_hash:
-        print("[❌] Thiếu API_ID/API_HASH riêng. Chạy python setup.py trước.")
-        return
     admin_id = state.config.get("ADMIN_ID", "")
     if not admin_id.isdigit() or int(admin_id) <= 0:
         print("[❌] Cần ADMIN_ID của bạn để dùng Helper Bot. Không tự cấp admin cho người nhắn đầu tiên.")
         return
+
+    if api_id <= 0 or not api_hash:
+        if not await run_api_setup(bot_token, admin_id):
+            return
+        state.reload_config()
+        raw_api_id = state.config.get("API_ID", "")
+        api_id = int(raw_api_id) if raw_api_id.isdigit() else 0
+        api_hash = state.config.get("API_HASH", "")
+        if api_id <= 0 or not api_hash:
+            print("[❌] Chưa lưu được API Telegram. Mở bot và /setup để thử lại.")
+            return
 
     print("=" * 60)
     print("🤖 KHỞI ĐỘNG TELEGRAM HELPER BOT...")
@@ -1680,10 +1773,19 @@ async def run_standalone_bot():
         else:
             print("[ℹ️] Chưa có SESSION_STRING. Hãy nhắn tin /start với bot trên Telegram và chọn 'Đăng nhập Telegram' để bắt đầu!")
 
+        if not engine.is_running:
+            lang = state.config.get("LANGUAGE", "vi")
+            try:
+                await bot_client.send_message(int(admin_id), format_setup_guide(lang), parse_mode="html", buttons=get_setup_keyboard(lang))
+            except Exception:
+                print("[ℹ️] Hãy mở chat riêng với Helper Bot và nhấn Start / gửi /setup để tiếp tục.")
+
         print("\nNhấn Ctrl+C để dừng bot.")
         await bot_client.run_until_disconnected()
     finally:
         try:
+            for user_id in list(user_sessions):
+                await cancel_user_dialog(user_id)
             await engine.stop()
         finally:
             await bot_client.disconnect()

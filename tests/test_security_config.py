@@ -6,7 +6,7 @@ import tempfile
 import unittest
 from pathlib import Path
 from types import SimpleNamespace
-from unittest.mock import Mock, patch
+from unittest.mock import AsyncMock, Mock, patch
 
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -109,7 +109,9 @@ class HelperSecurityTests(unittest.IsolatedAsyncioTestCase):
         self.helper.state.config.update({"API_ID": "", "API_HASH": ""})
         with patch.object(self.helper.state, "reload_config"):
             with patch.object(self.helper, "TelegramClient") as client:
-                await self.helper.run_standalone_bot()
+                with patch.object(self.helper, "run_api_setup", new=AsyncMock(return_value=False)) as setup:
+                    await self.helper.run_standalone_bot()
+                setup.assert_awaited_once_with("fake-bot-token", "42")
             ok, message = await self.profile.ProfileEngine().start()
         client.assert_not_called()
         self.assertFalse(ok)
