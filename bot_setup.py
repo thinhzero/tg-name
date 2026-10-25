@@ -9,6 +9,8 @@ from telethon import TelegramClient
 from telethon.sessions import StringSession
 
 from updater_state import state
+from bot_updater import bot_updater
+from reset_control import reset_requests, reset_notice, reset_buttons, apply_config_reset, cleanup_reset_sessions
 
 
 class BotSetupError(Exception):
@@ -69,6 +71,7 @@ class BotAPISetup:
             [{"text": self.text("1️⃣ Nhập API_ID / API_HASH", "1️⃣ Enter API_ID / API_HASH"), "callback_data": "bootstrap_api"}],
             [{"text": "🌐 my.telegram.org/apps", "url": "https://my.telegram.org/apps"}],
             [{"text": "🇻🇳 Tiếng Việt", "callback_data": "bootstrap_vi"}, {"text": "🇬🇧 English", "callback_data": "bootstrap_en"}],
+            [{"text": self.text("🧹 Đặt lại cấu hình", "🧹 Reset settings"), "callback_data": "reset_request"}],
         ])
 
     def authorized(self, message, sender):
@@ -85,13 +88,38 @@ class BotAPISetup:
             await asyncio.wait_for(client.disconnect(), timeout=10)
 
     async def handle(self, update):
+        if state.is_resetting:
+            return False
         callback = update.get("callback_query")
         if callback:
             if not self.authorized(callback.get("message", {}), callback.get("from", {})):
                 return False
             await self.call("answerCallbackQuery", callback_query_id=callback["id"])
-            data = callback.get("data")
-            if data == "bootstrap_api":
+            data = callback.get("data", "")
+            if data == "reset_request":
+                await self.offer_reset()
+            elif data.startswith("reset_cancel:"):
+                reset_requests.consume(self.admin_id, data.split(":", 1)[1])
+                await self.show_menu()
+            elif data.startswith("reset_confirm:"):
+                if not reset_requests.consume(self.admin_id, data.split(":", 1)[1]):
+                    await self.send(self.text("⚠️ Xác nhận đã hết hạn/đã dùng. Gửi /reset để mở lại.", "⚠️ Reset expired. Send /reset again."))
+                    return False
+                state.is_resetting = True
+                try:
+                    apply_config_reset()
+                    cleanup_reset_sessions()
+                except Exception as exc:
+                    state.is_resetting = False
+                    await self.send(self.text(f"❌ Reset chưa hoàn tất ({type(exc).__name__}).", f"❌ Reset failed ({type(exc).__name__})."))
+                    return False
+                self.action = None
+                self.api_id = ""
+                try:
+                    await self.send(self.text("✅ Chỉ giữ BOT_TOKEN + ADMIN_ID. Đang khởi động lại...", "✅ Kept BOT_TOKEN + ADMIN_ID only. Restarting..."))
+                finally:
+                    bot_updater.request_restart()
+            elif data == "bootstrap_api":
                 self.action = "api_id"
                 self.api_id = ""
                 await self.send(self.text("🆔 Gửi <b>API_ID</b> của bạn (số dương):", "🆔 Send your <b>API_ID</b> (a positive number):"), self.cancel_keyboard())
@@ -113,6 +141,9 @@ class BotAPISetup:
         if not text:
             return False
         command = text.split()[0].split("@", 1)[0]
+        if command == "/reset":
+            await self.offer_reset()
+            return False
         if command in ("/start", "/setup", "/cancel"):
             self.action = None
             self.api_id = ""
@@ -162,6 +193,13 @@ class BotAPISetup:
         except (BotSetupError, aiohttp.ClientError, asyncio.TimeoutError):
             pass
         return True
+
+    async def offer_reset(self):
+        self.action = None
+        self.api_id = ""
+        lang = state.config.get("LANGUAGE", "vi")
+        token = reset_requests.create(self.admin_id)
+        await self.send(reset_notice(lang), reset_buttons(token, lang))
 
 
 async def run_api_setup(token, admin_id):

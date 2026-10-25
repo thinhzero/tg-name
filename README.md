@@ -17,6 +17,28 @@ và một Helper Bot riêng để điều khiển bằng nút bấm. **Helper Bo
 **Cần có:** Python 3.10 trở lên, Git, kết nối mạng và tài khoản Telegram.
 Các lệnh trong khối `bash` bên dưới chạy ở **terminal trên máy/VPS**, không gửi vào Telegram.
 
+### Chạy nhanh — chỉ cần `python name.py`
+
+```bash
+git clone https://github.com/thinhzero/tg-name.git
+cd tg-name
+python name.py
+```
+
+Nếu máy chỉ có lệnh `python3`, dùng `python3 name.py`. Script kiểm tra thư viện **trước khi
+import Telegram**, tự cài đầy đủ từ `requirements.txt` nếu thiếu. Khi đang ở Python hệ thống,
+script tạo/tái sử dụng `.venv` rồi chuyển sang Python trong đó, không ép sửa Python hệ thống.
+Nếu đang trong virtualenv thì cài vào chính môi trường đó. Cần mạng và quyền ghi thư mục;
+nếu thiếu công cụ tạo venv trên Ubuntu/Debian, cài `python3-venv` rồi chạy lại.
+
+Lần đầu chưa có cấu hình, script chỉ hỏi **BOT_TOKEN (ẩn)** và **ADMIN_ID**. Nếu đã có hai
+giá trị trong `.env` thì không hỏi lại. Sau đó mở bot, nhấn **Start** để nhập API và đăng nhập
+Telethon trong chat. Không cần nhập SĐT/OTP/2FA ở VPS. Chạy bằng PM2/không có terminal tương
+tác thì cần điền sẵn hai giá trị trong `.env`.
+
+Nếu dùng cách chạy nhanh này, **bỏ qua các bước cài thủ công bên dưới** và chuyển tới phần
+lệnh Telegram. Những bước dưới là lựa chọn cho người muốn tự cấu hình/môi trường Python.
+
 ### Bước 1 — Tải code và cài thư viện
 
 ```bash
@@ -170,6 +192,8 @@ Helper Bot chỉ nhận lệnh trong **chat riêng**, từ `ADMIN_ID` đã cấu
 | --- | --- | --- |
 | Hướng dẫn | `.help` | `/help` |
 | Wizard cài đặt qua nút bấm | — | `/setup` |
+| Cài đặt trực quan | — | `/settings` |
+| Reset, chỉ giữ BOT_TOKEN + ADMIN_ID | — | `/reset` (cần xác nhận) |
 | Trạng thái | `.status` | `/status` hoặc `/start` |
 | Xem trước tên và bio | `.preview` | `/preview` |
 | Cập nhật tên/bio ngay | `.update` | `/update` |
@@ -191,6 +215,29 @@ Helper Bot chỉ nhận lệnh trong **chat riêng**, từ `ADMIN_ID` đã cấu
 Trên Helper Bot, `/cancel` hủy thao tác nhập đang dang dở. Đăng nhập qua terminal được
 khuyến nghị; nếu dùng wizard đăng nhập qua chat, không chuyển tiếp OTP/2FA và xóa tin nhắn
 nhạy cảm sau khi hoàn tất. Không gửi token/API key trong nhóm hoặc ảnh chụp màn hình.
+
+### Cài đặt bằng nút bấm và `/reset`
+
+Mở **Cài đặt** hoặc gửi `/settings`: có các nút đăng nhập, API Telegram, tên, thành phố,
+múi giờ, mẫu tên/bio, ngôn ngữ, thời tiết, username/key Last.fm, quản lý random và **Đặt lại cấu hình**.
+Trong mục Random, bấm **Thêm random**, chọn trang bằng mũi tên hoặc bấm nút thùng rác cạnh
+một mục và xác nhận để xóa; không cần nhớ lệnh/UID.
+
+Muốn làm lại từ đầu, admin gửi `/reset` hoặc bấm **Đặt lại cấu hình → Xác nhận reset**:
+
+- Chỉ admin đã cấu hình, trong chat riêng, mới được reset. Không xóa gì nếu chưa xác nhận.
+  Nút xác nhận dùng một lần, hết hạn sau 5 phút; bấm **Hủy** để giữ cấu hình.
+- Bot dừng cập nhật profile, đóng kết nối rồi đặt lại `.env` chỉ còn đúng **hai khóa**:
+  `BOT_TOKEN` và `ADMIN_ID`, với giá trị hiện tại. Xóa cả API/key cũ, session string, thiết
+  lập tên/bio và các biến cũ trong `.env`; không tạo bản sao chứa key cũ.
+- Dọn các file session cục bộ `bot.session`, `helper_bot_session.session`, session đang
+  cấu hình và journal/wal/shm của chúng trong repo. Không xóa symlink/session ngoài repo,
+  không xóa code hoặc `name.txt`. Nếu có file ngoài repo hay lỗi quyền dọn file, kiểm tra
+  thủ công; không xem reset là cách thu hồi mọi bản sao session.
+- Bot tự restart vào màn hình cài đặt: nhập lại API riêng và đăng nhập Telegram bằng nút.
+  `/reset` cũng dùng được ở màn hình khởi tạo khi chưa có API.
+- Reset chỉ xóa cấu hình/phiên **trên máy chạy bot**, không xóa lịch sử chat, không thu hồi
+  API key/token tại dịch vụ cấp key hay chấm dứt mọi phiên Telegram từ xa.
 
 ### Các từ khóa để viết mẫu tên / bio
 

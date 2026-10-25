@@ -4,7 +4,9 @@ updater_state.py - Quản lý trạng thái chung giữa Profile Updater và Hel
 
 import os
 import asyncio
-from dotenv import load_dotenv
+import tempfile
+from pathlib import Path
+from dotenv import load_dotenv, dotenv_values
 
 ENV_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), ".env")
 DEFAULT_NAME_FORMAT = "{base_name} | HH:mm - DD/MM | {gmt} | {random}"
@@ -13,6 +15,8 @@ class UpdaterState:
     def __init__(self):
         self.is_running = False
         self.is_paused = False
+        self.is_resetting = False
+        self._env_keys = set()
         self.account_name = ""
         self.account_id = ""
         self.last_update_time = "Chưa cập nhật"
@@ -39,6 +43,7 @@ class UpdaterState:
 
     def reload_config(self):
         """Tải lại biến môi trường từ .env"""
+        self._env_keys.update(dotenv_values(ENV_FILE))
         load_dotenv(ENV_FILE, override=True)
 
         def value(key, default=""):
@@ -66,6 +71,8 @@ class UpdaterState:
 
     def update_config(self, updates: dict):
         """Cập nhật cấu hình vào file .env và nạp lại, bảo toàn dấu # và ký tự đặc biệt"""
+        if self.is_resetting:
+            raise RuntimeError("Configuration reset is in progress")
         lines = []
         if os.path.exists(ENV_FILE):
             with open(ENV_FILE, "r", encoding="utf-8") as f:
@@ -100,6 +107,32 @@ class UpdaterState:
                 os.fchmod(f.fileno(), 0o600)
             f.writelines(new_lines)
 
+        self.reload_config()
+
+    def reset_config(self):
+        """Thay .env nguyên tử, giữ đúng BOT_TOKEN + ADMIN_ID, bỏ cả env đã cache."""
+        keep = {key: self.config.get(key, "").strip() for key in ("BOT_TOKEN", "ADMIN_ID")}
+        if not keep["BOT_TOKEN"] or not keep["ADMIN_ID"].isdigit() or int(keep["ADMIN_ID"]) <= 0:
+            raise ValueError("BOT_TOKEN and ADMIN_ID are required for a safe reset")
+        remove = (set(self.config) | self._env_keys | set(dotenv_values(ENV_FILE))) - set(keep)
+        temp_path = None
+        try:
+            with tempfile.NamedTemporaryFile(mode="w", encoding="utf-8", dir=Path(ENV_FILE).parent,
+                                             prefix=".env.reset-", delete=False) as handle:
+                temp_path = Path(handle.name)
+                for key, value in keep.items():
+                    escaped = value.replace("\\", "\\\\").replace('"', '\\"').replace("\n", "\\n").replace("\r", "")
+                    handle.write(f'{key}="{escaped}"\n')
+                handle.flush()
+                os.fsync(handle.fileno())
+            os.replace(temp_path, ENV_FILE)
+        finally:
+            if temp_path is not None:
+                temp_path.unlink(missing_ok=True)
+        for key in remove:
+            os.environ.pop(key, None)
+        os.environ.update(keep)
+        self._env_keys = set(keep)
         self.reload_config()
 
     @property

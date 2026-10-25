@@ -37,6 +37,7 @@ from i18n import get_text
 from bot_updater import bot_updater, run_with_restart, UpdateError
 from random_names import random_names
 from bot_setup import run_api_setup
+from reset_control import reset_requests, reset_notice, reset_buttons, apply_config_reset, cleanup_reset_sessions
 
 # Lưu trạng thái đàm thoại của user: user_id -> {"action": ..., "data": ...}
 user_sessions = {}
@@ -62,6 +63,78 @@ def get_setup_keyboard(lang=None):
         [Button.inline("▶️ Start / Stop" if en else "▶️ Chạy / Dừng", data="toggle_engine"), Button.inline("⚙️ Other settings" if en else "⚙️ Cài đặt khác", data="menu_settings")],
         [Button.inline("🏠 Dashboard" if en else "🏠 Bảng điều khiển", data="main_menu")],
     ]
+
+
+def get_reset_keyboard(token, lang="vi"):
+    return [[Button.inline(item["text"], data=item["callback_data"]) for item in row] for row in reset_buttons(token, lang)]
+
+
+async def offer_reset(event):
+    if not is_admin(event.sender_id) or not event.is_private:
+        return
+    await cancel_user_dialog(event.sender_id)
+    lang = state.config.get("LANGUAGE", "vi")
+    token = reset_requests.create(event.sender_id)
+    await event.respond(reset_notice(lang), parse_mode="html", buttons=get_reset_keyboard(token, lang))
+
+
+async def confirm_reset(event, token):
+    if not is_admin(event.sender_id) or not event.is_private:
+        return
+    lang = state.config.get("LANGUAGE", "vi")
+    if state.is_resetting or not reset_requests.consume(event.sender_id, token):
+        await event.answer("Reset expired; send /reset again." if lang == "en" else "Xác nhận đã hết hạn/đã dùng. Gửi /reset để mở lại.", alert=True)
+        return
+    if bot_updater.is_busy:
+        await event.answer("An update is in progress. Try /reset later." if lang == "en" else "Đang cập nhật bot. Thử /reset sau khi hoàn tất.", alert=True)
+        return
+    state.is_resetting = True
+    try:
+        try:
+            await event.answer("Resetting..." if lang == "en" else "Đang đặt lại cấu hình...")
+        except Exception:
+            pass
+        for user_id in list(user_sessions):
+            await cancel_user_dialog(user_id)
+        await engine.stop()
+        apply_config_reset()
+    except Exception as exc:
+        state.is_resetting = False
+        await event.respond(f"❌ Reset chưa hoàn tất ({type(exc).__name__}). Kiểm tra quyền .env rồi thử lại.", parse_mode="html")
+        return
+    try:
+        await event.edit(
+            "✅ Kept BOT_TOKEN + ADMIN_ID only. Restarting into setup..." if lang == "en" else
+            "✅ .env chỉ còn BOT_TOKEN + ADMIN_ID. Bot đang khởi động lại vào màn hình cài đặt...",
+            buttons=None,
+        )
+    finally:
+        bot_updater.request_restart()
+
+
+def random_settings_panel(page=0, lang="vi"):
+    entries = random_names.entries()
+    pages = max(1, (len(entries) + 5) // 6)
+    page = min(max(0, page), pages - 1)
+    visible = entries[page * 6:(page + 1) * 6]
+    text = f"🎲 <b>Random — {len(entries)} {'entries' if lang == 'en' else 'mục'}</b> ({page + 1}/{pages})\n"
+    rows = []
+    for entry in visible:
+        display = entry.text[:80] + ("…" if len(entry.text) > 80 else "")
+        text += f"\n<code>{entry.uid}</code> — {escape(display)}"
+        rows.append([Button.inline(f"🗑 {entry.text[:24]}", data=f"random_remove:{entry.uid}")])
+    if not entries:
+        text += "\n" + get_text("random_empty", lang)
+    rows.append([Button.inline("➕ Add random" if lang == "en" else "➕ Thêm random", data="setup_random_add")])
+    navigation = []
+    if page:
+        navigation.append(Button.inline("⬅️", data=f"menu_random:{page - 1}"))
+    if page + 1 < pages:
+        navigation.append(Button.inline("➡️", data=f"menu_random:{page + 1}"))
+    if navigation:
+        rows.append(navigation)
+    rows.append([Button.inline(get_text("btn_back", lang), data="menu_settings")])
+    return text, rows
 
 
 def format_setup_guide(lang=None):
@@ -178,7 +251,7 @@ def get_main_keyboard(lang: str = None):
         [run_btn, pause_btn],
         [Button.inline(get_text("btn_settings", lang), data="menu_settings"), Button.inline(get_text("btn_language", lang), data="menu_language")],
         [Button.inline(get_text("btn_status", lang), data="status"), Button.inline(get_text("btn_help", lang), data="help")],
-        [Button.inline("🛠 Setup wizard" if lang == "en" else "🛠 Cài đặt từng bước", data="menu_setup")]
+        [Button.inline("🛠 Setup wizard" if lang == "en" else "🛠 Cài đặt từng bước", data="menu_setup"), Button.inline("🎲 Random", data="menu_random")]
     ]
 
 def get_settings_keyboard(lang: str = None):
@@ -191,9 +264,11 @@ def get_settings_keyboard(lang: str = None):
     return [
         [Button.inline(session_label, data="setup_login")],
         [Button.inline(get_text("btn_set_name", lang), data="setup_name"), Button.inline(get_text("btn_set_city", lang), data="setup_city")],
-        [Button.inline(f"🎵 Last.fm ({has_lastfm})", data="setup_lastfm"), Button.inline(get_text("btn_set_weather", lang), data="setup_weather")],
+        [Button.inline(f"🎵 Last.fm ({has_lastfm})", data="setup_lastfm"), Button.inline("🔑 Last.fm API key", data="setup_lastfm_key")],
+        [Button.inline(get_text("btn_set_weather", lang), data="setup_weather"), Button.inline("🎲 Random", data="menu_random")],
         [Button.inline(get_text("btn_set_timezone", lang), data="setup_timezone"), Button.inline(get_text("btn_set_api_creds", lang), data="setup_api_creds")],
         [Button.inline(get_text("btn_set_format", lang), data="setup_format"), Button.inline(get_text("btn_language", lang), data="menu_language")],
+        [Button.inline("🧹 Reset settings" if lang == "en" else "🧹 Đặt lại cấu hình", data="reset_request")],
         [Button.inline(get_text("btn_back_main", lang), data="main_menu")]
     ]
 
@@ -413,6 +488,8 @@ def format_bio_preview_card(lang: str = None):
 async def handle_updatecheck(message):
     """Dùng chung cho .updatecheck của chủ tài khoản và /updatecheck của admin."""
     lang = state.config.get("LANGUAGE", "vi")
+    if state.is_resetting:
+        return
 
     async def progress(key):
         await message.edit(get_text(key, lang), parse_mode="html")
@@ -492,6 +569,13 @@ def format_help(lang="vi", helper=False):
     p = "/" if helper else "."
     name_cmd = "setname" if helper else "name"
     city_cmd = "setcity" if helper else "city"
+    settings_help = ""
+    if helper:
+        settings_help = (
+            "• <code>/settings</code>: settings buttons; <code>/reset</code>: keep only bot token/admin (confirmation required).\n"
+            if lang == "en" else
+            "• <code>/settings</code>: cài bằng nút bấm; <code>/reset</code>: chỉ giữ token bot/admin (cần xác nhận).\n"
+        )
     example = (
         f"<code>{p}{name_cmd} HzzMonet</code>\n"
         f"<code>{p}nameformat {DEFAULT_NAME_FORMAT}</code>\n"
@@ -512,6 +596,7 @@ def format_help(lang="vi", helper=False):
             f"• <code>{p}update</code>: update name/bio now.\n"
             f"• <code>{p}updatecheck</code>: update CODE from GitHub and restart.\n"
             f"• <code>{p}status</code>, <code>{p}pause</code>, <code>{p}resume</code>\n"
+            f"{settings_help}"
             f"• <code>{p}bioformat {{weather_short}} ⏰ HH:mm</code>: change bio.\n"
             f"• <code>{p}previewbio</code>: check the 70-character bio limit.\n"
             f"• <code>{p}{city_cmd} Hanoi</code>, <code>{p}weather</code>\n"
@@ -533,6 +618,7 @@ def format_help(lang="vi", helper=False):
         f"• <code>{p}update</code>: đổi tên/bio ngay.\n"
         f"• <code>{p}updatecheck</code>: cập nhật CODE từ GitHub rồi restart.\n"
         f"• <code>{p}status</code>, <code>{p}pause</code>, <code>{p}resume</code>\n"
+        f"{settings_help}"
         f"• <code>{p}bioformat {{weather_short}} ⏰ HH:mm</code>: đổi mẫu bio.\n"
         f"• <code>{p}previewbio</code>: kiểm tra giới hạn 70 ký tự bio.\n"
         f"• <code>{p}{city_cmd} Hanoi</code>, <code>{p}weather</code>\n"
@@ -682,7 +768,7 @@ def register_bot_handlers(bot_client: TelegramClient):
     @bot_client.on(events.NewMessage)
     @bot_client.on(events.CallbackQuery)
     async def private_chat_only(event):
-        if not event.is_private:
+        if not event.is_private or state.is_resetting:
             raise events.StopPropagation
 
     @bot_client.on(events.NewMessage(pattern=r"^/cancel$"))
@@ -709,6 +795,18 @@ def register_bot_handlers(bot_client: TelegramClient):
         await cancel_user_dialog(event.sender_id)
         lang = state.config.get("LANGUAGE", "vi")
         await event.reply(format_setup_guide(lang), parse_mode="html", buttons=get_setup_keyboard(lang))
+
+    @bot_client.on(events.NewMessage(pattern=r"^/reset(?:@\w+)?\s*$"))
+    async def reset_cmd(event):
+        if not is_admin(event.sender_id) or not event.is_private: return
+        await offer_reset(event)
+
+    @bot_client.on(events.NewMessage(pattern=r"^/settings(?:@\w+)?\s*$"))
+    async def settings_cmd(event):
+        if not is_admin(event.sender_id): return
+        await cancel_user_dialog(event.sender_id)
+        lang = state.config.get("LANGUAGE", "vi")
+        await event.reply(format_settings_text(lang), parse_mode="html", buttons=get_settings_keyboard(lang))
 
     @bot_client.on(events.NewMessage(pattern=r"^/(?:lang|language)(?:\s+(.*))?$"))
     async def lang_cmd(event):
@@ -1021,7 +1119,7 @@ def register_bot_handlers(bot_client: TelegramClient):
         try:
             await _user_input_handler_impl(event)
         finally:
-            if action in ("input_api_hash", "input_weather_api", "login_wait_phone", "login_wait_code", "login_wait_password"):
+            if action in ("input_api_hash", "input_weather_api", "input_lastfm_key", "login_wait_phone", "login_wait_code", "login_wait_password"):
                 try:
                     await event.delete()
                 except Exception:
@@ -1030,7 +1128,7 @@ def register_bot_handlers(bot_client: TelegramClient):
     async def _user_input_handler_impl(event):
         if not is_admin(event.sender_id): return
         if event.raw_text.strip() == "/cancel": return
-        if re.match(r"^/(?:updaterandom|lsrandom|rmrandom|help|updatecheck|start|setup|login)(?:@\w+)?(?:\s|$)", event.raw_text.strip()): return
+        if re.match(r"^/(?:updaterandom|lsrandom|rmrandom|help|updatecheck|start|setup|login|reset|settings)(?:@\w+)?(?:\s|$)", event.raw_text.strip()): return
 
         sess = user_sessions.get(event.sender_id)
         if not sess: return
@@ -1111,6 +1209,22 @@ def register_bot_handlers(bot_client: TelegramClient):
             else:
                 ack = "✅ Disconnected Last.fm." if lang == "en" else "✅ Đã tắt liên kết Last.fm."
                 await event.reply(ack, parse_mode="html", buttons=get_settings_keyboard(lang))
+
+        elif action == "input_lastfm_key":
+            value = "" if text.lower() in ("0", "none", "null") else text
+            if value and not re.fullmatch(r"[0-9a-fA-F]{32}", value):
+                await event.reply("⚠️ Last.fm API key cần 32 ký tự hex. Nhập lại, gửi 0 để xóa hoặc /cancel.")
+                return
+            state.update_config({"LASTFM_API_KEY": value})
+            user_sessions.pop(event.sender_id, None)
+            state.trigger_update()
+            await event.reply("✅ Last.fm API key đã lưu (ẩn)." if value else "✅ Đã xóa Last.fm API key.", buttons=get_settings_keyboard(lang))
+
+        elif action == "input_random_add":
+            user_sessions.pop(event.sender_id, None)
+            await handle_random_command(event, "updaterandom", text, lang, helper=True)
+            panel, buttons = random_settings_panel(lang=lang)
+            await event.reply(panel, parse_mode="html", buttons=buttons)
 
         # 3. Đổi API Key thời tiết
         elif action == "input_weather_api":
@@ -1337,10 +1451,59 @@ def register_bot_handlers(bot_client: TelegramClient):
 
         data = event.data.decode("utf-8")
         lang = state.config.get("LANGUAGE", "vi")
+        if data == "reset_request":
+            await offer_reset(event)
+            await event.answer()
+            return
+        if data.startswith("reset_confirm:"):
+            if event.is_private:
+                await confirm_reset(event, data.split(":", 1)[1])
+            return
+        if data.startswith("reset_cancel:"):
+            reset_requests.consume(event.sender_id, data.split(":", 1)[1])
+            await event.edit("Cancelled." if lang == "en" else "Đã hủy reset; cấu hình được giữ nguyên.", buttons=get_settings_keyboard(lang))
+            await event.answer()
+            return
         if data.startswith("bootstrap_"):
             data = "menu_setup"
         if data.startswith(("setup_", "menu_")) or data == "main_menu":
             await cancel_user_dialog(event.sender_id)
+
+        if data.startswith("menu_random"):
+            page = data.split(":", 1)[1] if ":" in data else "0"
+            panel, buttons = random_settings_panel(int(page) if page.isdigit() else 0, lang)
+            await event.edit(panel, parse_mode="html", buttons=buttons)
+            await event.answer()
+            return
+        if data == "setup_random_add":
+            user_sessions[event.sender_id] = {"action": "input_random_add"}
+            await event.respond("🎲 Gửi nội dung random muốn thêm (mỗi dòng một mục), hoặc /cancel:", buttons=get_cancel_keyboard(lang))
+            await event.answer()
+            return
+        if data == "setup_lastfm_key":
+            user_sessions[event.sender_id] = {"action": "input_lastfm_key"}
+            await event.respond("🔑 Gửi Last.fm API key riêng (32 ký tự hex), 0 để xóa hoặc /cancel. Tin nhắn chứa key sẽ được cố xóa sau khi xử lý.", buttons=get_cancel_keyboard(lang))
+            await event.answer()
+            return
+        if data.startswith("random_remove:"):
+            uid = data.split(":", 1)[1]
+            entry = next((entry for entry in random_names.entries() if entry.uid == uid), None)
+            if entry is None:
+                await event.answer("Không tìm thấy mục này.", alert=True)
+                return
+            await event.edit(f"🗑 Xóa <code>{escape(entry.text[:160])}</code>?", parse_mode="html", buttons=[
+                [Button.inline("✅ Xóa", data=f"random_confirm_remove:{uid}"), Button.inline("❌ Hủy", data="menu_random")],
+            ])
+            await event.answer()
+            return
+        if data.startswith("random_confirm_remove:"):
+            removed = random_names.remove(data.split(":", 1)[1])
+            if removed:
+                state.trigger_update()
+            panel, buttons = random_settings_panel(lang=lang)
+            await event.edit(panel, parse_mode="html", buttons=buttons)
+            await event.answer("Đã xóa." if removed else "Mục này không còn tồn tại.")
+            return
 
         # 1. Hủy thao tác
         if data == "cancel_action":
@@ -1789,6 +1952,8 @@ async def run_standalone_bot():
             await engine.stop()
         finally:
             await bot_client.disconnect()
+            if state.is_resetting:
+                cleanup_reset_sessions()
 
 if __name__ == "__main__":
     try:

@@ -3,16 +3,43 @@ name.py - Điểm khởi chạy chính của hệ thống Telegram Profile Updat
 
 - Nếu có BOT_TOKEN: Khởi chạy Helper Bot tương tác (đồng thời tự động khởi chạy Profile Updater).
 - Nếu không có BOT_TOKEN: Khởi chạy trực tiếp Profile Updater dưới nền.
+- Lần đầu chưa cấu hình: chỉ hỏi BOT_TOKEN + ADMIN_ID, phần đăng nhập làm trong chat.
+- Tự chuẩn bị virtualenv/thư viện còn thiếu trước khi import các module Telegram.
 """
 
 import asyncio
-from bot_updater import run_with_restart
-from updater_state import state
-from profile_engine import engine
-from helper_bot import run_standalone_bot
+import sys
+from getpass import getpass
+from startup import ensure_dependencies
+
+
+def prepare_bot_config(state):
+    """Lần chạy đầu chỉ hỏi token/admin, không yêu cầu đăng nhập Telegram trên VPS."""
+    config = state.config
+    if not config.get("BOT_TOKEN") and any(config.get(key) for key in ("API_ID", "API_HASH", "SESSION_STRING")):
+        return True  # Giữ chế độ Userbot không dùng Helper Bot.
+    if config.get("BOT_TOKEN") and config.get("ADMIN_ID", "").isdigit() and int(config["ADMIN_ID"]) > 0:
+        return True
+    if not sys.stdin.isatty():
+        print("[❌] Cần BOT_TOKEN + ADMIN_ID trong .env, hoặc chạy python name.py ở terminal để nhập lần đầu.")
+        return False
+    token = config.get("BOT_TOKEN", "")
+    while not token:
+        token = getpass("BOT_TOKEN từ @BotFather (ẩn): ").strip()
+    admin = config.get("ADMIN_ID", "")
+    while not admin.isdigit() or int(admin) <= 0:
+        admin = input("ADMIN_ID của chính bạn (ID số): ").strip()
+    state.update_config({"BOT_TOKEN": token, "ADMIN_ID": admin})
+    return True
 
 async def main():
+    from updater_state import state
+    from profile_engine import engine
+    from helper_bot import run_standalone_bot
+
     state.reload_config()
+    if not prepare_bot_config(state):
+        return
     bot_token = state.config.get("BOT_TOKEN", "").strip()
 
     if bot_token:
@@ -42,8 +69,16 @@ async def main():
         finally:
             await engine.stop()
 
-if __name__ == "__main__":
+def launch():
     try:
+        if not ensure_dependencies():
+            return 1
+        from bot_updater import run_with_restart
         run_with_restart(main)
     except (KeyboardInterrupt, SystemExit):
         print("\n[👋] Đã dừng chương trình.")
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(launch())

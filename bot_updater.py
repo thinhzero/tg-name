@@ -38,6 +38,10 @@ class BotUpdater:
         self._restart_pending = False
         self.restart_event = asyncio.Event()
 
+    @property
+    def is_busy(self):
+        return self._lock.locked() or self._restart_pending
+
     async def _run(self, *command, cwd=None, timeout=120, allowed_codes=(0,)):
         env = os.environ.copy()
         env.update({"GIT_TERMINAL_PROMPT": "0", "GCM_INTERACTIVE": "Never"})
@@ -91,7 +95,7 @@ class BotUpdater:
 
     async def update(self, progress):
         """Chỉ thay mã nguồn sau khi tải, kiểm tra và cài dependencies thành công."""
-        if self._lock.locked() or self._restart_pending:
+        if self.is_busy:
             raise UpdateError("self_update_busy")
 
         async with self._lock:
