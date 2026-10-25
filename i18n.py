@@ -30,16 +30,20 @@ TEXTS: Dict[str, Dict[str, str]] = {
         "en": "🔎 Check for updates"
     },
     "shell_usage": {
-        "vi": "💻 Dùng <code>/shell &lt;lệnh&gt;</code>, VD <code>/shell ls -la</code>, <code>/shell fastfetch</code>. Chỉ admin, chat riêng, Linux.",
-        "en": "💻 Use <code>/shell &lt;command&gt;</code>, e.g. <code>/shell ls -la</code> or <code>/shell fastfetch</code>. Admin only, private chat, Linux."
+        "vi": "💻 Dùng <code>/shell &lt;lệnh&gt;</code>, VD <code>/shell ls -la</code>, <code>/shell fastfetch</code>. Chỉ admin, chat riêng, Linux/Termux.",
+        "en": "💻 Use <code>/shell &lt;command&gt;</code>, e.g. <code>/shell ls -la</code> or <code>/shell fastfetch</code>. Admin only, private chat, Linux/Termux."
     },
     "shell_running": {
-        "vi": "⏳ Đang chạy lệnh Linux (tối đa 30 giây)...",
-        "en": "⏳ Running Linux command (up to 30 seconds)..."
+        "vi": "⏳ Đang chạy lệnh Linux/Termux (tối đa 30 giây)...",
+        "en": "⏳ Running Linux/Termux command (up to 30 seconds)..."
     },
     "shell_linux_only": {
-        "vi": "⚠️ /shell chỉ hoạt động trên Linux.",
-        "en": "⚠️ /shell is only available on Linux."
+        "vi": "⚠️ /shell chỉ hoạt động trên Linux/Termux.",
+        "en": "⚠️ /shell is only available on Linux/Termux."
+    },
+    "shell_missing_shell": {
+        "vi": "⚠️ Không tìm thấy bash/sh trong PATH. Trên Termux, chạy <code>pkg install bash</code> rồi thử lại.",
+        "en": "⚠️ No bash/sh found in PATH. On Termux, run <code>pkg install bash</code> and try again."
     },
     "shell_busy": {
         "vi": "⏳ Đang có một lệnh shell chạy. Chờ lệnh đó hoàn tất rồi thử lại.",
@@ -133,8 +137,16 @@ TEXTS: Dict[str, Dict[str, str]] = {
         "en": "❌ Git is not installed. Install <code>git</code> on the bot host and try again."
     },
     "self_update_not_git": {
-        "vi": "❌ Thư mục bot không phải bản Git clone độc lập. Hãy dùng <code>git clone https://github.com/thinhzero/tg-name.git</code> vào thư mục mới, chuyển .env/phiên đăng nhập sang và chạy lại.",
-        "en": "❌ The bot directory is not a standalone Git checkout. Use <code>git clone https://github.com/thinhzero/tg-name.git</code> in a new directory, transfer your .env/session files and start it again."
+        "vi": "❌ Git không tìm thấy metadata .git của bot tại <code>{directory}</code>. Chưa thay file nào. Kiểm tra bằng <code>git rev-parse --show-toplevel</code> ngay trong thư mục này; không xóa .env/session hay clone lại vội.",
+        "en": "❌ Git could not find the bot's .git metadata at <code>{directory}</code>. No files changed. Run <code>git rev-parse --show-toplevel</code> in this directory; do not delete .env/session files or re-clone yet."
+    },
+    "self_update_git_ownership": {
+        "vi": "⚠️ Git chặn thư mục do quyền sở hữu (dubious ownership): <code>{directory}</code>. Không cần clone lại. Nếu tin cậy thư mục này, mở terminal tại đó và chạy <code>git config --global --add safe.directory &quot;$(pwd -P)&quot;</code>, rồi thử lại. Bot không tự bỏ kiểm tra bảo mật của Git.",
+        "en": "⚠️ Git rejected the directory's ownership (dubious ownership): <code>{directory}</code>. No re-clone needed. If you trust this directory, open a terminal there and run <code>git config --global --add safe.directory &quot;$(pwd -P)&quot;</code>, then retry. The bot does not bypass Git's security checks."
+    },
+    "self_update_wrong_directory": {
+        "vi": "⚠️ Bot đang chạy từ <code>{directory}</code>, nhưng Git nhận thư mục gốc là <code>{root}</code>. Đã dừng để không cập nhật nhầm repo cha. Kiểm tra đường dẫn chạy bot; chưa thay .env/session hay mã nguồn.",
+        "en": "⚠️ The bot is running from <code>{directory}</code>, but Git reports <code>{root}</code> as its root. Stopped to avoid updating a parent repository. Check the bot's launch path; .env/session files and source are unchanged."
     },
     "self_update_dirty": {
         "vi": "⚠️ Mã nguồn có thay đổi cục bộ chưa commit. Đã hủy cập nhật để không ghi đè; hãy lưu và xử lý các thay đổi đó trước.",

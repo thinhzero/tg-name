@@ -12,7 +12,7 @@ import shell_commands
 from shell_commands import ShellError, ShellResult, ShellRunner, clipped_html, format_shell_result
 
 
-@unittest.skipUnless(sys.platform.startswith("linux"), "Linux shell execution")
+@unittest.skipUnless(sys.platform.startswith(("linux", "android")), "Linux/Termux shell execution")
 class ShellRunnerTests(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self):
         self.temp = tempfile.TemporaryDirectory(prefix="tg-name-shell-test-")
@@ -28,12 +28,39 @@ class ShellRunnerTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_commands_are_not_restricted_to_uptime(self):
         tool = self.root / "fastfetch"
-        tool.write_text("#!/bin/sh\nprintf 'test fastfetch\\n'\n")
+        tool.write_text(f"#!{shutil.which('sh')}\nprintf 'test fastfetch\\n'\n")
         tool.chmod(0o700)
         with patch.dict(os.environ, {"PATH": str(self.root) + os.pathsep + os.environ.get("PATH", "")}):
             result = await self.runner.run("fastfetch")
         self.assertEqual(result.returncode, 0)
         self.assertEqual(result.output, "test fastfetch")
+
+    async def test_termux_shell_is_found_in_prefix_path(self):
+        real_shell = shutil.which("sh")
+        prefix = self.root / "termux" / "usr"
+        binary_dir = prefix / "bin"
+        binary_dir.mkdir(parents=True)
+        shell = binary_dir / "bash"
+        shell.write_text(f"#!{real_shell}\nprintf 'used prefix shell' > shell-marker\nexec {shlex.quote(real_shell)} \"$@\"\n")
+        shell.chmod(0o700)
+        with patch.dict(os.environ, {"PATH": str(binary_dir), "PREFIX": str(prefix)}):
+            result = await self.runner.run("printf termux-ok")
+        self.assertEqual(result.returncode, 0)
+        self.assertEqual(result.output, "termux-ok")
+        self.assertEqual((self.root / "shell-marker").read_text(), "used prefix shell")
+
+    async def test_android_platform_accepts_termux_commands(self):
+        with patch.object(shell_commands.sys, "platform", "android"):
+            result = await self.runner.run("printf android-ok")
+        self.assertEqual(result.output, "android-ok")
+        self.assertEqual(result.returncode, 0)
+
+    async def test_sh_is_used_when_bash_is_unavailable(self):
+        real_shell = shutil.which("sh")
+        with patch.object(shell_commands.shutil, "which", side_effect=[None, real_shell]) as which:
+            result = await self.runner.run("printf sh-ok")
+        self.assertEqual(result.output, "sh-ok")
+        self.assertEqual([call.args[0] for call in which.call_args_list], ["bash", "sh"])
 
     async def test_arguments_pipelines_and_shell_syntax_are_supported(self):
         result = await self.runner.run("printf '%s\\n' 'hello world' | tr 'a-z' 'A-Z'")
@@ -142,6 +169,17 @@ class ShellFormattingTests(unittest.IsolatedAsyncioTestCase):
                 with self.assertRaises(ShellError) as error:
                     await runner.run("uptime")
         self.assertEqual(error.exception.key, "shell_linux_only")
+        create.assert_not_awaited()
+
+    async def test_missing_shell_is_reported_without_spawning(self):
+        runner = ShellRunner()
+        with patch.object(shell_commands.sys, "platform", "android"):
+            with patch.object(shell_commands.shutil, "which", return_value=None):
+                with patch.object(shell_commands.asyncio, "create_subprocess_exec", new=AsyncMock()) as create:
+                    with self.assertRaises(ShellError) as error:
+                        await runner.run("ls")
+        self.assertEqual(error.exception.key, "shell_missing_shell")
+        self.assertFalse(runner._lock.locked())
         create.assert_not_awaited()
 
     async def test_invalid_or_empty_commands_are_rejected(self):

@@ -39,6 +39,23 @@ tác thì cần điền sẵn hai giá trị trong `.env`.
 Nếu dùng cách chạy nhanh này, **bỏ qua các bước cài thủ công bên dưới** và chuyển tới phần
 lệnh Telegram. Những bước dưới là lựa chọn cho người muốn tự cấu hình/môi trường Python.
 
+### Android / Termux
+
+Trong Termux, cài các công cụ cần thiết:
+
+```bash
+pkg install python python-pip python-ensurepip-wheels git bash
+```
+
+Cài mới theo phần chạy nhanh ở trên, trong thư mục **`$HOME` của Termux**. Với repo đã có,
+chỉ vào đúng thư mục đó và chạy `python name.py`; không cần clone lại hay nhập lại token.
+Tránh đặt repo/`.venv` trong `/sdcard` hoặc `/storage/emulated/0`: bộ nhớ dùng chung có thể
+chặn thực thi, symlink và khiến Git báo `dubious ownership`.
+
+`/shell` tìm `bash`/`sh` trong `$PATH`, nên dùng được đường dẫn `$PREFIX/bin` của Termux.
+Các lệnh như `fastfetch` cần cài bằng `pkg` nếu chưa có. Bot vẫn chỉ nhận lệnh của admin
+trong chat riêng; giới hạn thời gian và output giống Linux.
+
 ### Bước 1 — Tải code và cài thư viện
 
 ```bash
@@ -217,13 +234,13 @@ Trên Helper Bot, `/cancel` hủy thao tác nhập đang dang dở. Đăng nhậ
 khuyến nghị; nếu dùng wizard đăng nhập qua chat, không chuyển tiếp OTP/2FA và xóa tin nhắn
 nhạy cảm sau khi hoàn tất. Không gửi token/API key trong nhóm hoặc ảnh chụp màn hình.
 
-### Nút cập nhật và lệnh Linux
+### Nút cập nhật và lệnh Linux / Termux
 
 Bấm **🔎 Kiểm tra cập nhật** ở menu chính hoặc **Cài đặt**: hành vi giống `/updatecheck`.
 Có bản mới thì tải, cập nhật an toàn và tự restart; đã mới nhất thì chỉ báo commit hiện tại.
 Nút này và `/updatecheck` cũng có ở màn hình khởi tạo khi chưa nhập API.
 
-Trên Linux, admin nhắn riêng với bot:
+Trên Linux hoặc Termux, admin nhắn riêng với bot:
 
 ```text
 /shell uptime
@@ -243,7 +260,7 @@ vượt 64 KiB. Kết quả gửi Telegram được rút gọn để không vư�
 bot bằng root; không đưa quyền admin/token cho người khác. Bot bỏ các biến môi trường nhạy
 cảm khỏi tiến trình con và cố che key/token đã biết trong kết quả, nhưng không thể bảo đảm
 che được dữ liệu bí mật đã mã hóa/biến đổi. Không dùng lệnh in `.env`, session hay private key
-vào chat. `/shell` chỉ chấp nhận đúng `ADMIN_ID`, chat riêng, và chỉ trên Linux; cũng dùng được
+vào chat. `/shell` chỉ chấp nhận đúng `ADMIN_ID`, chat riêng, và chỉ trên Linux/Termux; cũng dùng được
 ở màn hình khởi tạo trước khi nhập API. Không tự chạy lệnh của người khác hoặc output có sẵn.
 
 ### Cài đặt bằng nút bấm và `/reset`
@@ -341,6 +358,9 @@ có commit riêng hoặc file mới trùng file của bạn, bot dừng cập nh
 Hãy lưu/giải quyết các sửa đổi đó thủ công; **không cần `git reset --hard`**.
 Tải/cài lỗi sẽ không restart; pip có thể đã thay đổi một phần thư viện trước khi báo lỗi.
 Máy cần Git, quyền ghi repo và quyền cài thư viện trong virtualenv.
+Bot kiểm tra chính thư mục chứa mã nguồn, không phụ thuộc thư mục terminal hay biến `GIT_DIR`
+được kế thừa. Lỗi thiếu `.git`, chạy trong repo cha và quyền sở hữu Git có thông báo riêng;
+không tự đổi `safe.directory`, xóa file hay bắt chuyển `.env`/session sang clone khác.
 
 Nếu bản cũ chưa có `.updatecheck`: dừng bot, chạy `git pull --ff-only` và
 `python -m pip install -r requirements.txt`, rồi khởi động lại bằng cách bạn đang dùng.
@@ -361,6 +381,8 @@ Repo này công khai nên chức năng cập nhật **không cần GitHub token*
 | Báo FloodWait | Chờ đúng thời gian Telegram yêu cầu; không spam `.update` hoặc chạy nhiều bản |
 | Nhạc không hiện | Kiểm tra username, API key riêng và scrobbler Last.fm |
 | `.updatecheck` bị từ chối | Xem sửa đổi bằng `git status` / `git diff`; sao lưu rồi xử lý thủ công |
+| Cập nhật báo `dubious ownership` | Chỉ nếu tin cậy repo: mở terminal tại đúng thư mục và chạy `git config --global --add safe.directory "$(pwd -P)"`; không dùng `safe.directory '*'` |
+| Cập nhật báo thiếu `.git` hoặc sai thư mục | Xem đường dẫn bot/Git trong thông báo, chạy `git rev-parse --show-toplevel` tại đó. Không xóa `.env`/session hay clone lại vội |
 
 ## 7. Bảo mật và kiểm thử
 

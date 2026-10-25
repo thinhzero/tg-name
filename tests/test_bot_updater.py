@@ -1,8 +1,10 @@
 import asyncio
+import os
 import subprocess
 import tempfile
 import unittest
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
 import bot_updater
@@ -181,6 +183,102 @@ class BotUpdaterTests(unittest.IsolatedAsyncioTestCase):
         with self.assertRaises(UpdateError) as error:
             await updater.update(self.progress)
         self.assertEqual(error.exception.key, "self_update_not_git")
+        self.assertEqual(error.exception.details["directory"], str(Path(self.temp.name).resolve()))
+
+    async def test_inherited_git_directory_cannot_redirect_the_updater(self):
+        (self.remote / "name.py").write_text("VERSION = 2\n")
+        latest = self.commit("Update")
+        environment = {
+            "GIT_DIR": str(self.remote / ".git"), "GIT_WORK_TREE": str(self.remote),
+            "GIT_INDEX_FILE": str(self.remote / ".git" / "index"),
+            "GIT_CONFIG_COUNT": "1", "GIT_CONFIG_KEY_0": "core.bare", "GIT_CONFIG_VALUE_0": "true",
+            "GIT_TRACE": "1",
+        }
+        with patch.dict(os.environ, environment):
+            result = await self.updater.update(self.progress)
+        self.assertTrue(result.updated)
+        self.assertEqual(self.git(self.local, "rev-parse", "HEAD"), latest)
+        self.assertEqual((self.local / "name.py").read_text(), "VERSION = 2\n")
+        self.assertEqual(self.git(self.remote, "rev-parse", "HEAD"), latest)
+
+    async def test_git_warnings_do_not_become_part_of_repository_paths(self):
+        process = SimpleNamespace(
+            returncode=0,
+            communicate=AsyncMock(return_value=(str(self.local).encode(), b"warning: optional Git warning\n")),
+        )
+        with patch.object(bot_updater.asyncio, "create_subprocess_exec", new=AsyncMock(return_value=process)):
+            await self.updater._check_checkout()
+
+    async def test_git_preserves_termux_runtime_environment(self):
+        process = SimpleNamespace(returncode=0, communicate=AsyncMock(return_value=(b"ok", b"")))
+        environment = {
+            "PREFIX": "/data/data/com.termux/files/usr",
+            "LD_PRELOAD": "/data/data/com.termux/files/usr/lib/libtermux-exec.so",
+            "GIT_EXEC_PATH": "/data/data/com.termux/files/usr/libexec/git-core",
+            "GIT_DIR": "/wrong/repository/.git",
+        }
+        with patch.dict(os.environ, environment):
+            with patch.object(bot_updater.asyncio, "create_subprocess_exec", new=AsyncMock(return_value=process)) as create:
+                await self.updater._git("rev-parse", "HEAD")
+        env = create.call_args.kwargs["env"]
+        for key in ("PREFIX", "LD_PRELOAD", "GIT_EXEC_PATH"):
+            self.assertEqual(env[key], environment[key])
+        self.assertNotIn("GIT_DIR", env)
+        self.assertEqual(env["LC_ALL"], "C")
+
+    async def test_dubious_ownership_is_not_reported_as_a_missing_clone(self):
+        result = subprocess.CompletedProcess(
+            ("git",), 128, stdout="", stderr="fatal: detected dubious ownership in repository",
+        )
+        with patch.object(self.updater, "_git", new=AsyncMock(return_value=result)) as git:
+            with self.assertRaises(UpdateError) as error:
+                await self.updater.update(self.progress)
+        self.assertEqual(error.exception.key, "self_update_git_ownership")
+        self.assertEqual(error.exception.details["directory"], str(self.local.resolve()))
+        git.assert_awaited_once_with("rev-parse", "--show-toplevel", allowed_codes=(0, 128))
+
+    async def test_other_git_errors_are_not_reported_as_a_missing_clone(self):
+        result = subprocess.CompletedProcess(("git",), 128, stdout="", stderr="fatal: permission denied")
+        with patch.object(self.updater, "_git", new=AsyncMock(return_value=result)):
+            with self.assertRaises(UpdateError) as error:
+                await self.updater.update(self.progress)
+        self.assertEqual(error.exception.key, "self_update_command_failed")
+        self.assertIn("permission denied", error.exception.details["details"])
+
+    async def test_parent_repository_is_not_updated_by_mistake(self):
+        nested = self.local / "nested-bot"
+        nested.mkdir()
+        updater = BotUpdater(nested)
+        with self.assertRaises(UpdateError) as error:
+            await updater.update(self.progress)
+        self.assertEqual(error.exception.key, "self_update_wrong_directory")
+        self.assertEqual(error.exception.details["root"], str(self.local.resolve()))
+        self.assertEqual(error.exception.details["directory"], str(nested.resolve()))
+        self.assertEqual(self.git(self.local, "rev-parse", "HEAD"), self.initial)
+
+    async def test_linked_git_worktree_is_supported(self):
+        linked = Path(self.temp.name) / "linked"
+        self.git(self.local, "worktree", "add", "--detach", str(linked), self.initial)
+        self.assertTrue((linked / ".git").is_file())
+        (self.remote / "name.py").write_text("VERSION = 2\n")
+        latest = self.commit("Worktree update")
+        result = await BotUpdater(linked).update(self.progress)
+        self.assertTrue(result.updated)
+        self.assertEqual(self.git(linked, "rev-parse", "HEAD"), latest)
+        self.assertEqual(self.git(self.local, "rev-parse", "HEAD"), self.initial)
+
+    async def test_symlinked_checkout_is_supported(self):
+        linked = Path(self.temp.name) / "linked-bot"
+        linked.symlink_to(self.local, target_is_directory=True)
+        result = await BotUpdater(linked).update(self.progress)
+        self.assertFalse(result.updated)
+
+    async def test_successful_subprocess_keeps_stdout_and_stderr_separate(self):
+        result = await self.updater._run(
+            bot_updater.sys.executable, "-c", "import sys; print('result'); print('warning', file=sys.stderr)",
+        )
+        self.assertEqual(result.stdout, "result")
+        self.assertEqual(result.stderr, "warning")
 
     async def test_missing_git_is_reported(self):
         with patch("bot_updater.shutil.which", return_value=None):

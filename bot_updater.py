@@ -18,6 +18,12 @@ from i18n import get_text
 REPO_URL = "https://github.com/thinhzero/tg-name.git"
 UPDATE_BRANCH = "main"
 PROJECT_DIR = Path(__file__).resolve().parent
+GIT_REPOSITORY_ENV = {
+    "GIT_DIR", "GIT_WORK_TREE", "GIT_COMMON_DIR", "GIT_INDEX_FILE", "GIT_PREFIX",
+    "GIT_OBJECT_DIRECTORY", "GIT_ALTERNATE_OBJECT_DIRECTORIES", "GIT_SHALLOW_FILE",
+    "GIT_NAMESPACE", "GIT_CEILING_DIRECTORIES", "GIT_CONFIG", "GIT_CONFIG_COUNT",
+    "GIT_CONFIG_PARAMETERS", "GIT_IMPLICIT_WORK_TREE", "GIT_CURL_VERBOSE",
+}
 
 
 class UpdateError(Exception):
@@ -47,6 +53,13 @@ class BotUpdater:
 
     async def _run(self, *command, cwd=None, timeout=120, allowed_codes=(0,)):
         env = os.environ.copy()
+        if command[0] == "git":
+            env["LC_ALL"] = "C"
+            # Không để biến Git của shell/process cha chuyển lệnh sang repo khác.
+            # Giữ PATH/PREFIX/LD_PRELOAD để Git và termux-exec vẫn hoạt động.
+            for key in list(env):
+                if key in GIT_REPOSITORY_ENV or key.startswith(("GIT_TRACE", "GIT_CONFIG_KEY_", "GIT_CONFIG_VALUE_")):
+                    env.pop(key)
         env.update({"GIT_TERMINAL_PROMPT": "0", "GCM_INTERACTIVE": "Never"})
         process = await asyncio.create_subprocess_exec(
             *command,
@@ -54,11 +67,11 @@ class BotUpdater:
             env=env,
             stdin=subprocess.DEVNULL,
             stdout=subprocess.PIPE,
-            stderr=subprocess.STDOUT,
+            stderr=subprocess.PIPE,
             start_new_session=os.name == "posix",
         )
         try:
-            output, _ = await asyncio.wait_for(process.communicate(), timeout)
+            output, errors = await asyncio.wait_for(process.communicate(), timeout)
         except (asyncio.TimeoutError, asyncio.CancelledError) as exc:
             if process.returncode is None:
                 try:
@@ -73,12 +86,31 @@ class BotUpdater:
                 raise
             raise UpdateError("self_update_timeout") from exc
         text = output.decode("utf-8", errors="replace").rstrip("\r\n")
+        stderr = errors.decode("utf-8", errors="replace").rstrip("\r\n")
         if process.returncode not in allowed_codes:
-            raise UpdateError("self_update_command_failed", details=text[-1800:])
-        return subprocess.CompletedProcess(command, process.returncode, stdout=text)
+            details = "\n".join(part for part in (text, stderr) if part)
+            raise UpdateError("self_update_command_failed", details=details[-1800:])
+        return subprocess.CompletedProcess(command, process.returncode, stdout=text, stderr=stderr)
 
     async def _git(self, *args, **kwargs):
         return await self._run("git", *args, **kwargs)
+
+    async def _check_checkout(self):
+        repo = await self._git("rev-parse", "--show-toplevel", allowed_codes=(0, 128))
+        if repo.returncode:
+            errors = repo.stderr.lower()
+            if "dubious ownership" in errors or "unsafe repository" in errors:
+                raise UpdateError("self_update_git_ownership", directory=str(self.project_dir))
+            if "not a git repository" in errors:
+                raise UpdateError("self_update_not_git", directory=str(self.project_dir))
+            raise UpdateError("self_update_command_failed", details=repo.stderr[-1800:])
+        root = Path(repo.stdout).resolve()
+        try:
+            same_directory = root.samefile(self.project_dir)
+        except OSError:
+            same_directory = root == self.project_dir
+        if not same_directory:
+            raise UpdateError("self_update_wrong_directory", directory=str(self.project_dir), root=str(root))
 
     async def _check_clean(self):
         result = await self._git("status", "--porcelain", "--untracked-files=no")
@@ -104,9 +136,7 @@ class BotUpdater:
         async with self._lock:
             if not shutil.which("git"):
                 raise UpdateError("self_update_missing_git")
-            repo = await self._git("rev-parse", "--show-toplevel", allowed_codes=(0, 128))
-            if repo.returncode or Path(repo.stdout).resolve() != self.project_dir:
-                raise UpdateError("self_update_not_git")
+            await self._check_checkout()
 
             current = (await self._git("rev-parse", "HEAD")).stdout
             remote = await self._git("ls-remote", "--exit-code", REPO_URL, f"refs/heads/{UPDATE_BRANCH}")

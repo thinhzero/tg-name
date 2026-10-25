@@ -556,10 +556,10 @@ def format_help(lang="vi", helper=False):
     if helper:
         settings_help = (
             "• <code>/settings</code>: settings buttons; <code>/reset</code>: keep only bot token/admin (confirmation required).\n"
-            "• <code>/shell &lt;command&gt;</code>: any Linux command, e.g. <code>/shell ls -la</code> or <code>/shell fastfetch</code> (admin only, 30 seconds).\n"
+            "• <code>/shell &lt;command&gt;</code>: any Linux/Termux command, e.g. <code>/shell ls -la</code> or <code>/shell fastfetch</code> (admin only, 30 seconds).\n"
             if lang == "en" else
             "• <code>/settings</code>: cài bằng nút bấm; <code>/reset</code>: chỉ giữ token bot/admin (cần xác nhận).\n"
-            "• <code>/shell &lt;lệnh&gt;</code>: chạy lệnh Linux bất kỳ, VD <code>/shell ls -la</code>, <code>/shell fastfetch</code> (chỉ admin, 30 giây).\n"
+            "• <code>/shell &lt;lệnh&gt;</code>: chạy lệnh Linux/Termux bất kỳ, VD <code>/shell ls -la</code>, <code>/shell fastfetch</code> (chỉ admin, 30 giây).\n"
         )
     example = (
         f"<code>{p}{name_cmd} HzzMonet</code>\n"

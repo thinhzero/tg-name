@@ -1,8 +1,9 @@
-"""Chạy shell Linux cho admin: không tương tác, có timeout và giới hạn output."""
+"""Chạy shell Linux/Termux cho admin: không tương tác, có timeout và giới hạn output."""
 
 import asyncio
 import os
 import re
+import shutil
 import signal
 import subprocess
 import sys
@@ -64,7 +65,7 @@ class ShellRunner:
         return command
 
     async def run(self, command, secret_values=()):
-        if not sys.platform.startswith("linux"):
+        if not sys.platform.startswith(("linux", "android")):
             raise ShellError("shell_linux_only")
         command = self.normalize(command)
         if self._lock.locked():
@@ -75,7 +76,10 @@ class ShellRunner:
             for key in list(env):
                 if key in SENSITIVE_KEYS or SENSITIVE_NAME.search(key):
                     secrets.append(env.pop(key))
-            shell = "/bin/bash" if Path("/bin/bash").is_file() else "/bin/sh"
+            # Termux đặt shell trong $PREFIX/bin, không có /bin/bash hay /bin/sh.
+            shell = shutil.which("bash") or shutil.which("sh")
+            if not shell:
+                raise ShellError("shell_missing_shell")
             try:
                 process = await asyncio.create_subprocess_exec(
                     shell, "-c", command, cwd=self.cwd, env=env,
@@ -149,7 +153,7 @@ def clipped_html(text, budget):
 def format_shell_result(result, lang="vi"):
     command, command_shortened = clipped_html(result.command, 500)
     output, output_shortened = clipped_html(result.output or get_text("shell_empty_output", lang), 2500)
-    text = f"💻 <b>Shell · Linux</b>\n<code>{command}</code>\nExit: <code>{result.returncode}</code>\n<pre>{output}</pre>"
+    text = f"💻 <b>Shell · Linux / Termux</b>\n<code>{command}</code>\nExit: <code>{result.returncode}</code>\n<pre>{output}</pre>"
     if result.timed_out:
         text += "\n" + get_text("shell_timeout", lang)
     if result.truncated or output_shortened or command_shortened:

@@ -66,6 +66,18 @@ class UpdatecheckHandlerTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("&lt;failure&gt;&amp;", self.message.edit.call_args.args[0])
         self.updater.request_restart.assert_not_called()
 
+    async def test_checkout_errors_show_safe_directory_details(self):
+        for key in ("self_update_not_git", "self_update_git_ownership", "self_update_wrong_directory"):
+            with self.subTest(key=key):
+                self.updater.update.side_effect = UpdateError(key, directory="<bot>&", root="<parent>&")
+                await self.helper.handle_updatecheck(self.message)
+                text = self.message.edit.call_args.args[0]
+                self.assertIn("&lt;bot&gt;&amp;", text)
+                self.assertNotIn("<bot>", text)
+                self.assertNotIn("{directory}", text)
+                self.assertNotIn("{root}", text)
+        self.updater.request_restart.assert_not_called()
+
     async def test_progress_uses_selected_language(self):
         async def update(progress):
             await progress("self_update_downloading")
