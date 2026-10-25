@@ -13,6 +13,7 @@ from bot_updater import bot_updater, run_update_check
 from reset_control import reset_requests, reset_notice, reset_buttons, apply_config_reset, cleanup_reset_sessions
 from i18n import get_text
 from shell_commands import shell_runner, run_shell_message, config_secrets
+from presence import ping_message
 
 
 API_ERROR_HINTS = {
@@ -22,6 +23,7 @@ API_ERROR_HINTS = {
     "bot_blocked": "Admin cần bỏ chặn bot rồi nhấn Start.",
     "invalid_html": "Tin nhắn của bot có định dạng HTML không hợp lệ.",
     "message_not_modified": "Nội dung tin nhắn không thay đổi.",
+    "message_uneditable": "Tin giao diện đã bị xóa hoặc không còn sửa được.",
 }
 
 
@@ -41,6 +43,7 @@ class BotSetupError(Exception):
             ("bot_blocked", ("bot was blocked",)),
             ("invalid_html", ("can't parse entities", "unsupported start tag",)),
             ("message_not_modified", ("message is not modified",)),
+            ("message_uneditable", ("message to edit not found", "message can't be edited", "message_id_invalid")),
         ):
             if any(phrase in description for phrase in phrases):
                 self.reason = reason
@@ -62,6 +65,7 @@ class BotAPISetup:
         self.action = None
         self.api_id = ""
         self.started_at = int(time.time())
+        self.panel_message_id = None
 
     def text(self, vi, en):
         return en if state.config.get("LANGUAGE") == "en" else vi
@@ -83,10 +87,24 @@ class BotAPISetup:
         return data.get("result")
 
     async def send(self, text, keyboard=None):
-        payload = {"chat_id": self.admin_id, "text": text, "parse_mode": "HTML"}
-        if keyboard is not None:
-            payload["reply_markup"] = {"inline_keyboard": keyboard}
-        return await self.call("sendMessage", **payload)
+        rows = [list(row) for row in (keyboard or [])]
+        if not any(button.get("callback_data") == "main_menu" for row in rows for button in row):
+            rows.append([{"text": "🏠 Home", "callback_data": "main_menu"}])
+        payload = {"chat_id": self.admin_id, "text": text, "parse_mode": "HTML", "reply_markup": {"inline_keyboard": rows}}
+        if self.panel_message_id is not None:
+            try:
+                result = await self.call("editMessageText", message_id=self.panel_message_id, **payload)
+                return result if isinstance(result, dict) and "message_id" in result else {"message_id": self.panel_message_id}
+            except BotSetupError as exc:
+                if exc.reason == "message_not_modified":
+                    return {"message_id": self.panel_message_id}
+                if exc.reason != "message_uneditable":
+                    raise
+                self.panel_message_id = None
+        result = await self.call("sendMessage", disable_notification=True, **payload)
+        if isinstance(result, dict) and isinstance(result.get("message_id"), int):
+            self.panel_message_id = result["message_id"]
+        return result
 
     def cancel_keyboard(self):
         return [[{"text": self.text("❌ Hủy / Nhập lại", "❌ Cancel / Start over"), "callback_data": "bootstrap_cancel"}]]
@@ -131,6 +149,9 @@ class BotAPISetup:
         if callback:
             if not self.authorized(callback.get("message", {}), callback.get("from", {})):
                 return False
+            message_id = callback.get("message", {}).get("message_id")
+            if self.panel_message_id is None and isinstance(message_id, int):
+                self.panel_message_id = message_id
             try:
                 await self.call("answerCallbackQuery", callback_query_id=callback["id"])
             except BotSetupError as exc:
@@ -168,10 +189,10 @@ class BotAPISetup:
                 self.action = "api_id"
                 self.api_id = ""
                 await self.send(self.text("🆔 Gửi <b>API_ID</b> của bạn (số dương):", "🆔 Send your <b>API_ID</b> (a positive number):"), self.cancel_keyboard())
-            elif data in ("bootstrap_cancel", "bootstrap_vi", "bootstrap_en"):
+            elif data in ("main_menu", "bootstrap_cancel", "bootstrap_vi", "bootstrap_en"):
                 self.action = None
                 self.api_id = ""
-                if data != "bootstrap_cancel":
+                if data in ("bootstrap_vi", "bootstrap_en"):
                     state.update_config({"LANGUAGE": data.rsplit("_", 1)[1]})
                 await self.show_menu()
             return False
@@ -186,21 +207,27 @@ class BotAPISetup:
         if not text:
             return False
         command = text.split()[0].split("@", 1)[0]
+        if command == "/ping":
+            parts = text.split(maxsplit=1)
+            async def edit_ping(text, parse_mode="html"):
+                await self.send(text)
+            await ping_message(parts[1] if len(parts) > 1 else "", edit_ping, state.config.get("LANGUAGE", "vi"))
+            return False
         if command == "/updatecheck":
             await self.check_update()
             return False
         if command == "/shell":
             parts = text.split(maxsplit=1)
             lang = state.config.get("LANGUAGE", "vi")
-            message = await self.send(get_text("shell_running", lang))
+            await self.send(get_text("shell_running", lang))
             async def edit_shell(text, parse_mode="html"):
-                await self.call("editMessageText", chat_id=self.admin_id, message_id=message["message_id"], text=text, parse_mode="HTML")
+                await self.send(text)
             await run_shell_message(parts[1] if len(parts) > 1 else "", edit_shell, lang, runner=shell_runner, secret_values=config_secrets(state.config))
             return False
         if command == "/reset":
             await self.offer_reset()
             return False
-        if command in ("/start", "/setup", "/cancel"):
+        if command in ("/start", "/home", "/setup", "/cancel"):
             self.action = None
             self.api_id = ""
             await self.show_menu()
@@ -259,9 +286,9 @@ class BotAPISetup:
 
     async def check_update(self):
         lang = state.config.get("LANGUAGE", "vi")
-        message = await self.send(get_text("self_update_checking", lang))
+        await self.send(get_text("self_update_checking", lang))
         async def edit(text, parse_mode="html"):
-            await self.call("editMessageText", chat_id=self.admin_id, message_id=message["message_id"], text=text, parse_mode="HTML")
+            await self.send(text)
         await run_update_check(edit, lang, updater=bot_updater)
 
 

@@ -25,6 +25,24 @@ MONTHS = {
 }
 
 TEXTS: Dict[str, Dict[str, str]] = {
+    "afk_no_reason": {"vi": "Không có", "en": "Not specified"},
+    "afk_enabled": {
+        "vi": "😴 <b>AFK</b>\nLý do: {reason}\nDùng <code>.on</code> hoặc <code>/on</code> để tắt.",
+        "en": "😴 <b>AFK</b>\nReason: {reason}\nUse <code>.on</code> or <code>/on</code> to return."
+    },
+    "afk_disabled": {"vi": "🟢 Đã tắt AFK.", "en": "🟢 AFK disabled."},
+    "afk_login_required": {"vi": "⚠️ Cần đăng nhập và chạy Userbot trước khi bật AFK.", "en": "⚠️ Log in and start the Userbot before enabling AFK."},
+    "afk_reply": {
+        "vi": "😴 <b>{name} đang AFK</b>\nThời gian: {duration}\nLý do: {reason}",
+        "en": "😴 <b>{name} is AFK</b>\nTime: {duration}\nReason: {reason}"
+    },
+    "ping_result": {
+        "vi": "🏓 <b>Pong!</b>\nĐộ trễ Telegram: <code>{latency} ms</code>\nUptime: <code>{uptime}</code>",
+        "en": "🏓 <b>Pong!</b>\nTelegram latency: <code>{latency} ms</code>\nUptime: <code>{uptime}</code>"
+    },
+    "ping_usage": {"vi": "🏓 Dùng <code>.ping</code> hoặc <code>.ping example.com</code> (Helper Bot: <code>/ping</code>). Chỉ nhập hostname/IP, không phải URL hay tùy chọn.", "en": "🏓 Use <code>.ping</code> or <code>.ping example.com</code> (Helper Bot: <code>/ping</code>). Enter a hostname/IP, not a URL or flags."},
+    "ping_missing": {"vi": "Chưa có lệnh ping. Termux: pkg install iputils.", "en": "ping is not installed. Termux: pkg install iputils."},
+    "ping_failed": {"vi": "Không ping được host hoặc đã hết thời gian chờ.", "en": "Host ping failed or timed out."},
     "btn_check_updates": {
         "vi": "🔎 Kiểm tra cập nhật",
         "en": "🔎 Check for updates"

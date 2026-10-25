@@ -22,6 +22,7 @@ import asyncio
 import urllib.request
 import urllib.parse
 from html import escape
+from functools import wraps
 from telethon import TelegramClient, events, Button
 from telethon.sessions import StringSession
 from telethon.errors import (
@@ -39,9 +40,16 @@ from random_names import random_names
 from bot_setup import run_api_setup
 from reset_control import reset_requests, reset_notice, reset_buttons, apply_config_reset, cleanup_reset_sessions
 from shell_commands import shell_runner, run_shell_message, config_secrets
+from helper_panel import HelperPanels
+from presence import presence, ping_message
 
 # Lưu trạng thái đàm thoại của user: user_id -> {"action": ..., "data": ...}
 user_sessions = {}
+
+
+def get_home_keyboard():
+    return [[Button.inline("🏠 Home", data="main_menu")]]
+
 
 async def cancel_user_dialog(user_id):
     sess = user_sessions.pop(user_id, None)
@@ -62,7 +70,7 @@ def get_setup_keyboard(lang=None):
         [Button.inline("🎨 Name / Bio format" if en else "🎨 Mẫu tên / Bio", data="setup_format")],
         [Button.inline("🌤 City" if en else "🌤 Thành phố", data="setup_city"), Button.inline("🌐 Language" if en else "🌐 Ngôn ngữ", data="menu_language")],
         [Button.inline("▶️ Start / Stop" if en else "▶️ Chạy / Dừng", data="toggle_engine"), Button.inline("⚙️ Other settings" if en else "⚙️ Cài đặt khác", data="menu_settings")],
-        [Button.inline("🏠 Dashboard" if en else "🏠 Bảng điều khiển", data="main_menu")],
+        [Button.inline("🏠 Home", data="main_menu")],
     ]
 
 
@@ -272,7 +280,7 @@ def get_settings_keyboard(lang: str = None):
         [Button.inline(get_text("btn_set_format", lang), data="setup_format"), Button.inline(get_text("btn_language", lang), data="menu_language")],
         [Button.inline(get_text("btn_check_updates", lang), data="updatecheck")],
         [Button.inline("🧹 Reset settings" if lang == "en" else "🧹 Đặt lại cấu hình", data="reset_request")],
-        [Button.inline(get_text("btn_back_main", lang), data="main_menu")]
+        [Button.inline("🏠 Home", data="main_menu")]
     ]
 
 def get_cancel_keyboard(lang: str = None):
@@ -287,7 +295,7 @@ def get_language_keyboard(lang: str = None):
     en_chk = " ✔" if lang == "en" else ""
     return [
         [Button.inline(f"🇻🇳 Tiếng Việt{vi_chk}", data="set_lang_vi"), Button.inline(f"🇬🇧 English{en_chk}", data="set_lang_en")],
-        [Button.inline(get_text("btn_back_main", lang), data="main_menu")]
+        [Button.inline("🏠 Home", data="main_menu")]
     ]
 
 def get_timezone_keyboard():
@@ -541,6 +549,9 @@ async def handle_random_command(event, cmd, arg, lang, helper=False):
     except (OSError, UnicodeError) as exc:
         pages = [get_text("random_file_error", lang, details=escape(str(exc)[:500]))]
 
+    if helper and hasattr(event, "show_pages"):
+        await event.show_pages(pages)
+        return
     for index, page in enumerate(pages):
         if helper or index:
             await event.reply(page, parse_mode="html")
@@ -581,6 +592,8 @@ def format_help(lang="vi", helper=False):
             f"• <code>{p}update</code>: update name/bio now.\n"
             f"• <code>{p}updatecheck</code>: update CODE from GitHub and restart.\n"
             f"• <code>{p}status</code>, <code>{p}pause</code>, <code>{p}resume</code>\n"
+            f"• <code>{p}afk [reason]</code>, <code>{p}on</code>: away / back online.\n"
+            f"• <code>{p}ping [host]</code>: Telegram latency + uptime; optional system ping.\n"
             f"{settings_help}"
             f"• <code>{p}bioformat {{weather_short}} ⏰ HH:mm</code>: change bio.\n"
             f"• <code>{p}previewbio</code>: check the 70-character bio limit.\n"
@@ -603,6 +616,8 @@ def format_help(lang="vi", helper=False):
         f"• <code>{p}update</code>: đổi tên/bio ngay.\n"
         f"• <code>{p}updatecheck</code>: cập nhật CODE từ GitHub rồi restart.\n"
         f"• <code>{p}status</code>, <code>{p}pause</code>, <code>{p}resume</code>\n"
+        f"• <code>{p}afk [lý do]</code>, <code>{p}on</code>: bật / tắt vắng mặt.\n"
+        f"• <code>{p}ping [host]</code>: độ trễ Telegram + uptime; có host thì ping hệ thống.\n"
         f"{settings_help}"
         f"• <code>{p}bioformat {{weather_short}} ⏰ HH:mm</code>: đổi mẫu bio.\n"
         f"• <code>{p}previewbio</code>: kiểm tra giới hạn 70 ký tự bio.\n"
@@ -616,13 +631,24 @@ def format_help(lang="vi", helper=False):
 
 def register_userbot_handlers(client: TelegramClient):
     """Đăng ký các lệnh tự điều khiển trên Userbot (.status, .name, .update, ...)"""
-    @client.on(events.NewMessage(outgoing=True, pattern=r"^\.(help|status|update|updatecheck|updaterandom|lsrandom|rmrandom|name|setname|basename|city|pause|resume|nameformat|setnameformat|bioformat|setbio|lastfm|music|bio|previewbio|preview|weather|lang)(?:\s+([\s\S]+))?$"))
+    @client.on(events.NewMessage(outgoing=True, pattern=r"^\.(help|status|update|updatecheck|updaterandom|lsrandom|rmrandom|afk|on|ping|name|setname|basename|city|pause|resume|nameformat|setnameformat|bioformat|setbio|lastfm|music|bio|previewbio|preview|weather|lang)(?:\s+([\s\S]+))?$"))
     async def userbot_command_handler(event):
         cmd = event.pattern_match.group(1).lower()
         arg = (event.pattern_match.group(2) or "").strip()
         cur_lang = state.config.get("LANGUAGE", "vi")
 
-        if cmd == "help":
+        if cmd == "afk":
+            presence.enable(arg)
+            await event.edit(presence.notice(cur_lang), parse_mode="html")
+
+        elif cmd == "on":
+            presence.disable()
+            await event.delete()
+
+        elif cmd == "ping":
+            await ping_message(arg, event.edit, cur_lang)
+
+        elif cmd == "help":
             await event.edit(format_help(cur_lang), parse_mode="html")
 
         elif cmd == "lang":
@@ -743,12 +769,29 @@ def register_userbot_handlers(client: TelegramClient):
             state.trigger_update()
             await event.edit("▶️ <i>Đã tiếp tục tự động cập nhật profile!</i>", parse_mode="html")
 
+    @client.on(events.NewMessage(incoming=True))
+    async def afk_incoming_handler(event):
+        await presence.incoming(
+            event, state.account_id, state.config.get("BASE_NAME", ""), state.config.get("LANGUAGE", "vi"),
+        )
+
 # ============================================================
 # BỘ XỬ LÝ LỆNH & SỰ KIỆN HELPER BOT (BOTFATHER)
 # ============================================================
 
 def register_bot_handlers(bot_client: TelegramClient):
     """Đăng ký toàn bộ xử lý tin nhắn và nút bấm cho Helper Bot"""
+    panels = HelperPanels(get_home_keyboard)
+
+    def on(builder):
+        def register(handler):
+            @wraps(handler)
+            async def dispatch(event):
+                if is_admin(event.sender_id) and getattr(event, "is_private", True):
+                    event = panels.wrap(event)
+                return await handler(event)
+            return bot_client.on(builder)(dispatch)
+        return register
 
     @bot_client.on(events.NewMessage)
     @bot_client.on(events.CallbackQuery)
@@ -756,13 +799,13 @@ def register_bot_handlers(bot_client: TelegramClient):
         if not event.is_private or state.is_resetting:
             raise events.StopPropagation
 
-    @bot_client.on(events.NewMessage(pattern=r"^/cancel$"))
+    @on(events.NewMessage(pattern=r"^/cancel$"))
     async def cancel_cmd(event):
         if not is_admin(event.sender_id): return
         await cancel_user_dialog(event.sender_id)
         await event.reply("❌ <b>Đã hủy thao tác hiện tại!</b>", parse_mode="html", buttons=get_main_keyboard())
 
-    @bot_client.on(events.NewMessage(pattern=r"^/start(?:@\w+)?(?:\s+\S+)?\s*$"))
+    @on(events.NewMessage(pattern=r"^/(?:start|home)(?:@\w+)?(?:\s+\S+)?\s*$"))
     async def start_cmd(event):
         if not is_admin(event.sender_id):
             await event.reply("⛔ <b>Bạn không có quyền sử dụng bot này!</b>", parse_mode="html")
@@ -774,26 +817,26 @@ def register_bot_handlers(bot_client: TelegramClient):
         else:
             await event.reply(format_dashboard(lang), parse_mode="html", buttons=get_main_keyboard(lang))
 
-    @bot_client.on(events.NewMessage(pattern=r"^/setup(?:@\w+)?\s*$"))
+    @on(events.NewMessage(pattern=r"^/setup(?:@\w+)?\s*$"))
     async def setup_cmd(event):
         if not is_admin(event.sender_id): return
         await cancel_user_dialog(event.sender_id)
         lang = state.config.get("LANGUAGE", "vi")
         await event.reply(format_setup_guide(lang), parse_mode="html", buttons=get_setup_keyboard(lang))
 
-    @bot_client.on(events.NewMessage(pattern=r"^/reset(?:@\w+)?\s*$"))
+    @on(events.NewMessage(pattern=r"^/reset(?:@\w+)?\s*$"))
     async def reset_cmd(event):
         if not is_admin(event.sender_id) or not event.is_private: return
         await offer_reset(event)
 
-    @bot_client.on(events.NewMessage(pattern=r"^/settings(?:@\w+)?\s*$"))
+    @on(events.NewMessage(pattern=r"^/settings(?:@\w+)?\s*$"))
     async def settings_cmd(event):
         if not is_admin(event.sender_id): return
         await cancel_user_dialog(event.sender_id)
         lang = state.config.get("LANGUAGE", "vi")
         await event.reply(format_settings_text(lang), parse_mode="html", buttons=get_settings_keyboard(lang))
 
-    @bot_client.on(events.NewMessage(pattern=r"^/(?:lang|language)(?:\s+(.*))?$"))
+    @on(events.NewMessage(pattern=r"^/(?:lang|language)(?:\s+(.*))?$"))
     async def lang_cmd(event):
         if not is_admin(event.sender_id): return
         arg = (event.pattern_match.group(1) or "").strip().lower()
@@ -809,14 +852,14 @@ def register_bot_handlers(bot_client: TelegramClient):
             lang = state.config.get("LANGUAGE", "vi")
             await event.reply(get_text("choose_language", lang), parse_mode="html", buttons=get_language_keyboard(lang))
 
-    @bot_client.on(events.NewMessage(pattern=r"^/help$"))
+    @on(events.NewMessage(pattern=r"^/help$"))
     async def help_cmd(event):
         if not is_admin(event.sender_id): return
         lang = state.config.get("LANGUAGE", "vi")
         msg = format_help(lang, helper=True)
         await event.reply(msg, parse_mode="html", buttons=get_main_keyboard(lang))
 
-    @bot_client.on(events.NewMessage(pattern=r"^/login$"))
+    @on(events.NewMessage(pattern=r"^/login$"))
     async def login_cmd(event):
         if not is_admin(event.sender_id): return
         await cancel_user_dialog(event.sender_id)
@@ -829,25 +872,25 @@ def register_bot_handlers(bot_client: TelegramClient):
         )
         await event.reply(msg, parse_mode="html", buttons=get_cancel_keyboard())
 
-    @bot_client.on(events.NewMessage(pattern=r"^/status$"))
+    @on(events.NewMessage(pattern=r"^/status$"))
     async def status_cmd(event):
         if not is_admin(event.sender_id): return
         await event.reply(format_dashboard(), parse_mode="html", buttons=get_main_keyboard())
 
-    @bot_client.on(events.NewMessage(pattern=r"^/update$"))
+    @on(events.NewMessage(pattern=r"^/update$"))
     async def update_cmd(event):
         if not is_admin(event.sender_id): return
         state.trigger_update()
         await event.reply("🔄 <b>Đã gửi lệnh cập nhật profile!</b>", parse_mode="html", buttons=get_main_keyboard())
 
-    @bot_client.on(events.NewMessage(pattern=r"^/updatecheck(?:@\w+)?\s*$"))
+    @on(events.NewMessage(pattern=r"^/updatecheck(?:@\w+)?\s*$"))
     async def updatecheck_cmd(event):
         if not is_admin(event.sender_id): return
         lang = state.config.get("LANGUAGE", "vi")
         message = await event.reply(get_text("self_update_checking", lang), parse_mode="html")
         await handle_updatecheck(message)
 
-    @bot_client.on(events.NewMessage(pattern=r"^/shell(?:@\w+)?(?:\s+([\s\S]+))?\s*$"))
+    @on(events.NewMessage(pattern=r"^/shell(?:@\w+)?(?:\s+([\s\S]+))?\s*$"))
     async def shell_cmd(event):
         if not is_admin(event.sender_id) or not event.is_private or state.is_resetting: return
         lang = state.config.get("LANGUAGE", "vi")
@@ -855,7 +898,24 @@ def register_bot_handlers(bot_client: TelegramClient):
         message = await event.reply(get_text("shell_running", lang), parse_mode="html")
         await run_shell_message(command, message.edit, lang, runner=shell_runner, secret_values=config_secrets(state.config))
 
-    @bot_client.on(events.NewMessage(pattern=r"^/(updaterandom|lsrandom|rmrandom)(?:@\w+)?(?:\s+([\s\S]+))?$"))
+    @on(events.NewMessage(pattern=r"^/(afk|on|ping)(?:@\w+)?(?:\s+([\s\S]+))?\s*$"))
+    async def presence_cmd(event):
+        if not is_admin(event.sender_id): return
+        cmd = event.pattern_match.group(1)
+        arg = (event.pattern_match.group(2) or "").strip()
+        lang = state.config.get("LANGUAGE", "vi")
+        if cmd == "ping":
+            await ping_message(arg, event.edit, lang)
+        elif cmd == "on":
+            presence.disable()
+            await event.reply(get_text("afk_disabled", lang), parse_mode="html")
+        elif not engine.is_running:
+            await event.reply(get_text("afk_login_required", lang), parse_mode="html")
+        else:
+            presence.enable(arg)
+            await event.reply(presence.notice(lang), parse_mode="html")
+
+    @on(events.NewMessage(pattern=r"^/(updaterandom|lsrandom|rmrandom)(?:@\w+)?(?:\s+([\s\S]+))?$"))
     async def random_cmd(event):
         if not is_admin(event.sender_id): return
         cmd = event.pattern_match.group(1)
@@ -863,7 +923,7 @@ def register_bot_handlers(bot_client: TelegramClient):
         lang = state.config.get("LANGUAGE", "vi")
         await handle_random_command(event, cmd, arg, lang, helper=True)
 
-    @bot_client.on(events.NewMessage(pattern=r"^/preview$"))
+    @on(events.NewMessage(pattern=r"^/preview$"))
     async def preview_cmd(event):
         if not is_admin(event.sender_id): return
         lang = state.config.get("LANGUAGE", "vi")
@@ -879,19 +939,19 @@ def register_bot_handlers(bot_client: TelegramClient):
         )
         await event.reply(msg, parse_mode="html", buttons=get_main_keyboard(lang))
 
-    @bot_client.on(events.NewMessage(pattern=r"^/previewbio(?:@\w+)?$"))
+    @on(events.NewMessage(pattern=r"^/previewbio(?:@\w+)?$"))
     async def previewbio_cmd(event):
         if not is_admin(event.sender_id): return
         lang = state.config.get("LANGUAGE", "vi")
         await event.reply(format_bio_preview_card(lang), parse_mode="html", buttons=get_main_keyboard(lang))
 
-    @bot_client.on(events.NewMessage(pattern=r"^/weather(?:@\w+)?$"))
+    @on(events.NewMessage(pattern=r"^/weather(?:@\w+)?$"))
     async def weather_cmd(event):
         if not is_admin(event.sender_id): return
         lang = state.config.get("LANGUAGE", "vi")
         await event.reply(format_weather_card(lang), parse_mode="html", buttons=get_main_keyboard(lang))
 
-    @bot_client.on(events.NewMessage(pattern=r"^/(?:setname|basename|name)(?:@\w+)?(?:\s+([\s\S]+))?$"))
+    @on(events.NewMessage(pattern=r"^/(?:setname|basename|name)(?:@\w+)?(?:\s+([\s\S]+))?$"))
     async def setname_cmd(event):
         if not is_admin(event.sender_id): return
         val = (event.pattern_match.group(1) or "").strip()
@@ -930,7 +990,7 @@ def register_bot_handlers(bot_client: TelegramClient):
             )
         await event.reply(resp_msg, parse_mode="html", buttons=get_main_keyboard(lang))
 
-    @bot_client.on(events.NewMessage(pattern=r"^/(?:set)?nameformat(?:@\w+)?(?:\s+([\s\S]+))?$"))
+    @on(events.NewMessage(pattern=r"^/(?:set)?nameformat(?:@\w+)?(?:\s+([\s\S]+))?$"))
     async def nameformat_cmd(event):
         if not is_admin(event.sender_id): return
         val = (event.pattern_match.group(1) or "").strip()
@@ -976,7 +1036,7 @@ def register_bot_handlers(bot_client: TelegramClient):
             )
         await event.reply(resp_msg, parse_mode="html", buttons=get_main_keyboard(lang))
 
-    @bot_client.on(events.NewMessage(pattern=r"^/(?:setbioformat|bioformat|setbio|bio)(?:@\w+)?(?:\s+([\s\S]+))?$"))
+    @on(events.NewMessage(pattern=r"^/(?:setbioformat|bioformat|setbio|bio)(?:@\w+)?(?:\s+([\s\S]+))?$"))
     async def bioformat_cmd(event):
         if not is_admin(event.sender_id): return
         val = (event.pattern_match.group(1) or "").strip()
@@ -1029,7 +1089,7 @@ def register_bot_handlers(bot_client: TelegramClient):
             )
         await event.reply(resp_msg, parse_mode="html", buttons=get_main_keyboard(lang))
 
-    @bot_client.on(events.NewMessage(pattern=r"^/setcity(?:\s+(.*))?$"))
+    @on(events.NewMessage(pattern=r"^/setcity(?:\s+(.*))?$"))
     async def setcity_cmd(event):
         if not is_admin(event.sender_id): return
         val = (event.pattern_match.group(1) or "").strip()
@@ -1041,20 +1101,20 @@ def register_bot_handlers(bot_client: TelegramClient):
         state.trigger_update()
         await event.reply(f"✅ Đã đổi <b>Thành phố</b> thành: <code>{val}</code>", parse_mode="html", buttons=get_main_keyboard())
 
-    @bot_client.on(events.NewMessage(pattern=r"^/pause$"))
+    @on(events.NewMessage(pattern=r"^/pause$"))
     async def pause_cmd(event):
         if not is_admin(event.sender_id): return
         state.is_paused = True
         await event.reply("⏸️ <b>Đã tạm dừng tự động cập nhật profile!</b>", parse_mode="html", buttons=get_main_keyboard())
 
-    @bot_client.on(events.NewMessage(pattern=r"^/resume$"))
+    @on(events.NewMessage(pattern=r"^/resume$"))
     async def resume_cmd(event):
         if not is_admin(event.sender_id): return
         state.is_paused = False
         state.trigger_update()
         await event.reply("▶️ <b>Đã tiếp tục tự động cập nhật profile!</b>", parse_mode="html", buttons=get_main_keyboard())
 
-    @bot_client.on(events.NewMessage(pattern=r"^/(?:set)?lastfm(?:\s+(.*))?$"))
+    @on(events.NewMessage(pattern=r"^/(?:set)?lastfm(?:\s+(.*))?$"))
     async def lastfm_cmd(event):
         if not is_admin(event.sender_id): return
         val = (event.pattern_match.group(1) or "").strip()
@@ -1079,7 +1139,7 @@ def register_bot_handlers(bot_client: TelegramClient):
         else:
             await event.reply("✅ Đã tắt liên kết Last.fm.", parse_mode="html", buttons=get_main_keyboard())
 
-    @bot_client.on(events.NewMessage(pattern=r"^/(?:music|nowplaying)$"))
+    @on(events.NewMessage(pattern=r"^/(?:music|nowplaying)$"))
     async def music_cmd(event):
         if not is_admin(event.sender_id): return
         lastfm_user = state.config.get("LASTFM_USERNAME")
@@ -1105,7 +1165,7 @@ def register_bot_handlers(bot_client: TelegramClient):
     # ========================================================
     # XỬ LÝ NỘI DUNG NHẬP TỪ NGƯỜI DÙNG (CONVERSATIONAL INPUT)
     # ========================================================
-    @bot_client.on(events.NewMessage)
+    @on(events.NewMessage)
     async def user_input_handler(event):
         if not is_admin(event.sender_id): return
         action = user_sessions.get(event.sender_id, {}).get("action")
@@ -1121,7 +1181,7 @@ def register_bot_handlers(bot_client: TelegramClient):
     async def _user_input_handler_impl(event):
         if not is_admin(event.sender_id): return
         if event.raw_text.strip() == "/cancel": return
-        if re.match(r"^/(?:updaterandom|lsrandom|rmrandom|help|updatecheck|start|setup|login|reset|settings|shell)(?:@\w+)?(?:\s|$)", event.raw_text.strip()): return
+        if re.match(r"^/(?:updaterandom|lsrandom|rmrandom|help|updatecheck|start|home|setup|login|reset|settings|shell|afk|on|ping)(?:@\w+)?(?:\s|$)", event.raw_text.strip()): return
 
         sess = user_sessions.get(event.sender_id)
         if not sess: return
@@ -1425,7 +1485,7 @@ def register_bot_handlers(bot_client: TelegramClient):
     # ========================================================
     # XỬ LÝ NÚT BẤM (CALLBACK QUERIES)
     # ========================================================
-    @bot_client.on(events.CallbackQuery)
+    @on(events.CallbackQuery)
     async def callback_handler(event):
         try:
             await _callback_handler_impl(event)
@@ -1444,6 +1504,13 @@ def register_bot_handlers(bot_client: TelegramClient):
 
         data = event.data.decode("utf-8")
         lang = state.config.get("LANGUAGE", "vi")
+        if data.startswith("panel_page:"):
+            page = data.split(":", 1)[1]
+            pages = event.panel.get("pages", [])
+            if pages and page.isdigit():
+                await event.show_pages(pages, int(page))
+            await event.answer()
+            return
         if data == "updatecheck":
             if not event.is_private or state.is_resetting: return
             await event.answer()
@@ -1885,6 +1952,8 @@ def register_bot_handlers(bot_client: TelegramClient):
             await event.respond(format_help(lang, helper=True), parse_mode="html")
             await event.answer()
 
+    return panels
+
 async def run_standalone_bot():
     """Chạy Helper Bot độc lập"""
     state.reload_config()
@@ -1919,7 +1988,7 @@ async def run_standalone_bot():
     print("=" * 60)
 
     bot_client = TelegramClient("helper_bot_session", api_id, api_hash)
-    register_bot_handlers(bot_client)
+    panels = register_bot_handlers(bot_client)
 
     try:
         await bot_client.start(bot_token=bot_token)
@@ -1938,7 +2007,8 @@ async def run_standalone_bot():
         if not engine.is_running:
             lang = state.config.get("LANGUAGE", "vi")
             try:
-                await bot_client.send_message(int(admin_id), format_setup_guide(lang), parse_mode="html", buttons=get_setup_keyboard(lang))
+                message = await bot_client.send_message(int(admin_id), format_setup_guide(lang), parse_mode="html", buttons=get_setup_keyboard(lang), silent=True)
+                panels.remember(int(admin_id), message)
             except Exception:
                 print("[ℹ️] Hãy mở chat riêng với Helper Bot và nhấn Start / gửi /setup để tiếp tục.")
 

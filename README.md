@@ -215,6 +215,9 @@ Helper Bot chỉ nhận lệnh trong **chat riêng**, từ `ADMIN_ID` đã cấu
 | Xem trước tên và bio | `.preview` | `/preview` |
 | Cập nhật tên/bio ngay | `.update` | `/update` |
 | Tạm dừng / tiếp tục | `.pause` / `.resume` | `/pause` / `/resume` |
+| Vắng mặt / trở lại | `.afk [lý do]` / `.on` | `/afk [lý do]` / `/on` |
+| Ping và uptime | `.ping [host]` | `/ping [host]` |
+| Về Home nhanh | — | `/home` hoặc nút **🏠 Home** |
 | Đổi tên cố định | `.name tên mới` | `/setname tên mới` |
 | Đổi mẫu tên | `.nameformat mẫu` | `/nameformat mẫu` |
 | Đổi mẫu bio | `.bioformat mẫu` | `/bioformat mẫu` |
@@ -233,6 +236,37 @@ Helper Bot chỉ nhận lệnh trong **chat riêng**, từ `ADMIN_ID` đã cấu
 Trên Helper Bot, `/cancel` hủy thao tác nhập đang dang dở. Đăng nhập qua terminal được
 khuyến nghị; nếu dùng wizard đăng nhập qua chat, không chuyển tiếp OTP/2FA và xóa tin nhắn
 nhạy cảm sau khi hoàn tất. Không gửi token/API key trong nhóm hoặc ảnh chụp màn hình.
+
+### AFK, online và ping
+
+```text
+.afk đi ngủ
+.on
+.ping
+.ping example.com
+```
+
+`.afk` bật vắng mặt: khi có người mention hoặc reply tin của bạn, Userbot trả lý do và thời
+gian AFK. Mỗi người trong mỗi chat được trả lời tối đa một lần mỗi 60 giây; tin trả lời
+gửi im lặng và cố tự xóa sau 5 giây. Tin thường không mention/reply, tin từ bot và tin của chính
+bạn không kích hoạt. `.on` tắt AFK và xóa chính tin lệnh; không đổi trạng thái online Telegram.
+AFK chỉ lưu trong lần chạy hiện tại, không tự thay tên/bio hay tạm dừng Profile Updater.
+
+`.ping` sửa chính tin lệnh để hiện độ trễ gửi/sửa tin qua Telegram và uptime của tiến trình.
+Thêm hostname/IP để chạy một gói ping hệ thống (timeout 5 giây), không dùng raw socket hay
+thư viện `ping3`. Trên Termux, nếu chưa có lệnh ping: `pkg install iputils`.
+Helper Bot nhận `/afk`, `/on`, `/ping` từ admin; bật AFK cần Userbot đang chạy.
+
+### Helper Bot ít thông báo
+
+Menu, wizard nhập cấu hình, xem trước, kết quả `/shell` và tiến trình cập nhật ưu tiên **sửa
+cùng một tin nhắn của bot**. Tin đầu tiên, hoặc khi tin cũ đã bị xóa/không sửa được, được gửi
+mới ở chế độ im lặng. Sau khi restart bot có thể tạo một panel mới; không sửa tin của bạn.
+Danh sách random dài có nút chuyển trang thay vì đẩy nhiều tin nối tiếp.
+
+Mỗi màn hình có **🏠 Home**; bấm để hủy bước nhập đang chờ, đóng phiên đăng nhập tạm và về
+bảng điều khiển. `/home` hoặc `/start` cũng mở lại giao diện. Tin chứa OTP/API hash/mật khẩu
+vẫn được cố xóa riêng; kết quả tác vụ cũ không ghi đè màn hình Home vừa mở.
 
 ### Nút cập nhật và lệnh Linux / Termux
 
@@ -365,42 +399,3 @@ không tự đổi `safe.directory`, xóa file hay bắt chuyển `.env`/session
 Nếu bản cũ chưa có `.updatecheck`: dừng bot, chạy `git pull --ff-only` và
 `python -m pip install -r requirements.txt`, rồi khởi động lại bằng cách bạn đang dùng.
 Repo này công khai nên chức năng cập nhật **không cần GitHub token**.
-
-## 6. Khi gặp lỗi
-
-| Triệu chứng | Cách xử lý |
-| --- | --- |
-| Thiếu API_ID/API_HASH | Nếu đã có token + admin: mở bot và /start để nhập API. Nếu không dùng Helper Bot: cấu hình bằng setup.py |
-| Chưa đăng nhập / session hết hạn | Chạy lại bước đăng nhập trong `setup.py` |
-| Helper Bot báo thiếu ADMIN_ID | Điền ID số của bạn; bot không cấp admin cho người nhắn đầu tiên |
-| Bot API `answerCallbackQuery: mã 400` / nút hết hạn | Bấm lại nút hoặc gửi `/start`. Bản mới bỏ qua sự kiện lỗi, không đọc lại vô hạn |
-| Bot API báo lỗi 400 khác | Xem tên phương thức và gợi ý trong log. Với `chat not found`, kiểm tra ADMIN_ID và nhấn Start bằng đúng tài khoản; không cần xóa `.env` |
-| `.status` không trả lời | Dùng chính tài khoản đã đăng nhập, kiểm tra tiến trình còn chạy |
-| Thiếu module Python | Kích hoạt `.venv`, cài lại `requirements.txt`, dùng đúng interpreter của PM2 |
-| Tên/bio bị cắt | Rút ngắn mẫu hoặc random; xem `.preview` / `.previewbio` |
-| Báo FloodWait | Chờ đúng thời gian Telegram yêu cầu; không spam `.update` hoặc chạy nhiều bản |
-| Nhạc không hiện | Kiểm tra username, API key riêng và scrobbler Last.fm |
-| `.updatecheck` bị từ chối | Xem sửa đổi bằng `git status` / `git diff`; sao lưu rồi xử lý thủ công |
-| Cập nhật báo `dubious ownership` | Chỉ nếu tin cậy repo: mở terminal tại đúng thư mục và chạy `git config --global --add safe.directory "$(pwd -P)"`; không dùng `safe.directory '*'` |
-| Cập nhật báo thiếu `.git` hoặc sai thư mục | Xem đường dẫn bot/Git trong thông báo, chạy `git rev-parse --show-toplevel` tại đó. Không xóa `.env`/session hay clone lại vội |
-
-## 7. Bảo mật và kiểm thử
-
-- `.gitignore` chặn `.env`/bản sao env, session, `name.txt`, virtualenv, log và cache.
-  Trước khi commit vẫn nên kiểm tra `git status` và `git diff --cached`.
-- API hash/key từng được ghi cứng trong các commit cũ. Bản hiện tại đã bỏ chúng;
-  **xóa khỏi bản mới không xóa khỏi lịch sử Git**. Nếu là key của bạn, hãy đổi/thu hồi.
-- Nếu session Telegram lộ: vào **Settings → Devices** để chấm dứt phiên tương ứng.
-  Nếu bot token hoặc token GitHub lộ: thu hồi tại dịch vụ cấp token, không chỉ xóa file.
-- Không đăng log có key/OTP/session. Helper Bot không hiển thị lại API hash/key đã lưu.
-
-Kiểm thử không cần đăng nhập Telegram hay gọi GitHub thật:
-
-```bash
-python -m unittest discover -s tests -v
-```
-
-`name.py` là file chạy chính; `setup.py` là wizard. `generate_session.py` là lựa chọn phụ
-để đăng nhập và lưu session vào `.env` mà không in session ra terminal. Các file `*_engine`,
-`*_state`, `helper_bot.py`, `bot_updater.py`, `random_names.py`, `i18n.py` là module của bot,
-không cần chạy từng file riêng.

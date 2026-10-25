@@ -380,6 +380,69 @@ class BotAPICallTests(unittest.IsolatedAsyncioTestCase):
 
 
 @unittest.skipUnless(HAS_DEPENDENCIES, "Cài requirements.txt để kiểm thử đăng nhập qua bot")
+class BotAPISetupPanelTests(unittest.IsolatedAsyncioTestCase):
+    async def asyncSetUp(self):
+        import bot_setup
+        self.module = bot_setup
+        self.setup = bot_setup.BotAPISetup(Mock(), "fake-bot-token", "42")
+        self.setup.call = AsyncMock(return_value={"message_id": 7})
+
+    async def test_repeated_prompts_edit_one_silent_message(self):
+        await self.setup.send("Prompt")
+        await self.setup.send("Next prompt")
+        calls = self.setup.call.call_args_list
+        self.assertEqual([call.args[0] for call in calls], ["sendMessage", "editMessageText"])
+        self.assertTrue(calls[0].kwargs["disable_notification"])
+        self.assertEqual(calls[1].kwargs["message_id"], 7)
+        keyboard = calls[1].kwargs["reply_markup"]["inline_keyboard"]
+        self.assertIn("main_menu", [button["callback_data"] for row in keyboard for button in row])
+
+    async def test_home_callback_cancels_input_and_edits_the_clicked_menu(self):
+        self.setup.action = "api_hash"
+        self.setup.api_id = "123"
+        await self.setup.handle({"callback_query": {
+            "id": "cb", "data": "main_menu", "from": {"id": 42},
+            "message": {"message_id": 7, "chat": {"id": 42, "type": "private"}},
+        }})
+        self.assertIsNone(self.setup.action)
+        self.assertEqual(self.setup.api_id, "")
+        self.assertEqual([call.args[0] for call in self.setup.call.call_args_list], ["answerCallbackQuery", "editMessageText"])
+
+    async def test_unchanged_text_does_not_send_a_duplicate(self):
+        await self.setup.send("Same")
+        self.setup.call.side_effect = self.module.BotSetupError(400, description="Bad Request: message is not modified")
+        self.assertEqual(await self.setup.send("Same"), {"message_id": 7})
+        self.assertEqual(self.setup.call.call_args.args[0], "editMessageText")
+
+    async def test_deleted_panel_creates_one_silent_replacement(self):
+        self.setup.call.side_effect = [
+            {"message_id": 7},
+            self.module.BotSetupError(400, description="Bad Request: message to edit not found"),
+            {"message_id": 9},
+        ]
+        await self.setup.send("First")
+        self.assertEqual(await self.setup.send("Replacement"), {"message_id": 9})
+        self.assertEqual(self.setup.panel_message_id, 9)
+        self.assertEqual([call.args[0] for call in self.setup.call.call_args_list], ["sendMessage", "editMessageText", "sendMessage"])
+        self.assertTrue(self.setup.call.call_args.kwargs["disable_notification"])
+
+    async def test_network_error_does_not_fall_back_to_duplicate_send(self):
+        await self.setup.send("First")
+        self.setup.call.side_effect = self.module.BotSetupError(500)
+        with self.assertRaises(self.module.BotSetupError):
+            await self.setup.send("Next")
+        self.assertEqual(self.setup.call.await_count, 2)
+
+    async def test_ping_works_before_api_setup_without_followup_messages(self):
+        await self.setup.handle({"message": {
+            "date": self.setup.started_at, "from": {"id": 42},
+            "chat": {"id": 42, "type": "private"}, "text": "/ping",
+        }})
+        self.assertEqual([call.args[0] for call in self.setup.call.call_args_list], ["sendMessage", "editMessageText"])
+        self.assertIn("Uptime", self.setup.call.call_args.kwargs["text"])
+
+
+@unittest.skipUnless(HAS_DEPENDENCIES, "Cài requirements.txt để kiểm thử đăng nhập qua bot")
 class HelperOnboardingTests(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self):
         import helper_bot

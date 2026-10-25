@@ -49,6 +49,7 @@ class AdminToolsTests(unittest.IsolatedAsyncioTestCase):
         return SimpleNamespace(
             sender_id=sender, is_private=private, raw_text=text, data=data.encode() if data else None,
             reply=AsyncMock(return_value=self.message), respond=AsyncMock(return_value=self.message), answer=AsyncMock(),
+            edit=self.message.edit,
         )
 
     async def test_update_button_is_present_in_both_menus(self):

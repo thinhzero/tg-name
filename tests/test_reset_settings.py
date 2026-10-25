@@ -254,10 +254,15 @@ class ResetAndSettingsHandlerTests(unittest.IsolatedAsyncioTestCase):
             for row in self.helper.get_settings_keyboard() for button in row
         }
         self.assertTrue({"reset_request", "menu_random", "setup_lastfm_key", "setup_api_creds"} <= data_values)
+        first_event = None
+        edits = 0
         for data in ("menu_settings", "setup_name", "setup_city", "setup_weather", "setup_api_creds", "setup_timezone", "setup_format", "setup_lastfm", "setup_lastfm_key", "menu_random", "setup_random_add"):
             event = self.event(data)
+            first_event = first_event or event
             await self.client.handlers["callback_handler"](event)
-            self.assertTrue(event.edit.await_count or event.respond.await_count, data)
+            self.assertGreater(first_event.edit.await_count, edits, data)
+            edits = first_event.edit.await_count
+            event.respond.assert_not_awaited()
 
     async def test_telethon_can_build_all_settings_and_confirmation_keyboards(self):
         for keyboard in (
