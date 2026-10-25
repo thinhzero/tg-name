@@ -211,10 +211,40 @@ Helper Bot chỉ nhận lệnh trong **chat riêng**, từ `ADMIN_ID` đã cấu
 | Xem nhạc | `.music` | `/music` |
 | Đổi ngôn ngữ | `.lang vi` / `.lang en` | `/lang vi` / `/lang en` |
 | Cập nhật code và restart | `.updatecheck` | `/updatecheck` |
+| Chạy lệnh Linux | — | `/shell uptime` hoặc `/shell lệnh` (chỉ admin) |
 
 Trên Helper Bot, `/cancel` hủy thao tác nhập đang dang dở. Đăng nhập qua terminal được
 khuyến nghị; nếu dùng wizard đăng nhập qua chat, không chuyển tiếp OTP/2FA và xóa tin nhắn
 nhạy cảm sau khi hoàn tất. Không gửi token/API key trong nhóm hoặc ảnh chụp màn hình.
+
+### Nút cập nhật và lệnh Linux
+
+Bấm **🔎 Kiểm tra cập nhật** ở menu chính hoặc **Cài đặt**: hành vi giống `/updatecheck`.
+Có bản mới thì tải, cập nhật an toàn và tự restart; đã mới nhất thì chỉ báo commit hiện tại.
+Nút này và `/updatecheck` cũng có ở màn hình khởi tạo khi chưa nhập API.
+
+Trên Linux, admin nhắn riêng với bot:
+
+```text
+/shell uptime
+/shell {uptime}
+/shell ls -la
+/shell fastfetch
+/shell df -h | head
+```
+
+Hai dòng đầu đều chạy `uptime`. Với `/shell lệnh`, bot chạy lệnh shell tại thư mục repo,
+trả stdout + stderr và exit code. Hỗ trợ lệnh có tham số/pipeline; không có stdin tương tác.
+Không giới hạn vào `uptime`: chạy lệnh có sẵn trên máy (`fastfetch` cần được cài trước).
+Mỗi lúc chỉ chạy một lệnh, timeout 30 giây; dừng nhóm tiến trình khi timeout/hủy hoặc output
+vượt 64 KiB. Kết quả gửi Telegram được rút gọn để không vượt giới hạn tin nhắn.
+
+**Đây là quyền chạy lệnh thật với quyền của tiến trình bot, không phải sandbox.** Không chạy
+bot bằng root; không đưa quyền admin/token cho người khác. Bot bỏ các biến môi trường nhạy
+cảm khỏi tiến trình con và cố che key/token đã biết trong kết quả, nhưng không thể bảo đảm
+che được dữ liệu bí mật đã mã hóa/biến đổi. Không dùng lệnh in `.env`, session hay private key
+vào chat. `/shell` chỉ chấp nhận đúng `ADMIN_ID`, chat riêng, và chỉ trên Linux; cũng dùng được
+ở màn hình khởi tạo trước khi nhập API. Không tự chạy lệnh của người khác hoặc output có sẵn.
 
 ### Cài đặt bằng nút bấm và `/reset`
 

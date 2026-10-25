@@ -9,8 +9,10 @@ from telethon import TelegramClient
 from telethon.sessions import StringSession
 
 from updater_state import state
-from bot_updater import bot_updater
+from bot_updater import bot_updater, run_update_check
 from reset_control import reset_requests, reset_notice, reset_buttons, apply_config_reset, cleanup_reset_sessions
+from i18n import get_text
+from shell_commands import shell_runner, run_shell_message, config_secrets
 
 
 class BotSetupError(Exception):
@@ -71,6 +73,7 @@ class BotAPISetup:
             [{"text": self.text("1️⃣ Nhập API_ID / API_HASH", "1️⃣ Enter API_ID / API_HASH"), "callback_data": "bootstrap_api"}],
             [{"text": "🌐 my.telegram.org/apps", "url": "https://my.telegram.org/apps"}],
             [{"text": "🇻🇳 Tiếng Việt", "callback_data": "bootstrap_vi"}, {"text": "🇬🇧 English", "callback_data": "bootstrap_en"}],
+            [{"text": get_text("btn_check_updates", state.config.get("LANGUAGE", "vi")), "callback_data": "updatecheck"}],
             [{"text": self.text("🧹 Đặt lại cấu hình", "🧹 Reset settings"), "callback_data": "reset_request"}],
         ])
 
@@ -96,7 +99,9 @@ class BotAPISetup:
                 return False
             await self.call("answerCallbackQuery", callback_query_id=callback["id"])
             data = callback.get("data", "")
-            if data == "reset_request":
+            if data == "updatecheck":
+                await self.check_update()
+            elif data == "reset_request":
                 await self.offer_reset()
             elif data.startswith("reset_cancel:"):
                 reset_requests.consume(self.admin_id, data.split(":", 1)[1])
@@ -141,6 +146,17 @@ class BotAPISetup:
         if not text:
             return False
         command = text.split()[0].split("@", 1)[0]
+        if command == "/updatecheck":
+            await self.check_update()
+            return False
+        if command == "/shell":
+            parts = text.split(maxsplit=1)
+            lang = state.config.get("LANGUAGE", "vi")
+            message = await self.send(get_text("shell_running", lang))
+            async def edit_shell(text, parse_mode="html"):
+                await self.call("editMessageText", chat_id=self.admin_id, message_id=message["message_id"], text=text, parse_mode="HTML")
+            await run_shell_message(parts[1] if len(parts) > 1 else "", edit_shell, lang, runner=shell_runner, secret_values=config_secrets(state.config))
+            return False
         if command == "/reset":
             await self.offer_reset()
             return False
@@ -200,6 +216,13 @@ class BotAPISetup:
         lang = state.config.get("LANGUAGE", "vi")
         token = reset_requests.create(self.admin_id)
         await self.send(reset_notice(lang), reset_buttons(token, lang))
+
+    async def check_update(self):
+        lang = state.config.get("LANGUAGE", "vi")
+        message = await self.send(get_text("self_update_checking", lang))
+        async def edit(text, parse_mode="html"):
+            await self.call("editMessageText", chat_id=self.admin_id, message_id=message["message_id"], text=text, parse_mode="HTML")
+        await run_update_check(edit, lang, updater=bot_updater)
 
 
 async def run_api_setup(token, admin_id):

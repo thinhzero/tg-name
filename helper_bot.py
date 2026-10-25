@@ -34,10 +34,11 @@ from telethon.errors import (
 from updater_state import state, DEFAULT_NAME_FORMAT
 from profile_engine import engine, generate_preview, get_lastfm_track
 from i18n import get_text
-from bot_updater import bot_updater, run_with_restart, UpdateError
+from bot_updater import bot_updater, run_with_restart, run_update_check
 from random_names import random_names
 from bot_setup import run_api_setup
 from reset_control import reset_requests, reset_notice, reset_buttons, apply_config_reset, cleanup_reset_sessions
+from shell_commands import shell_runner, run_shell_message, config_secrets
 
 # Lưu trạng thái đàm thoại của user: user_id -> {"action": ..., "data": ...}
 user_sessions = {}
@@ -251,6 +252,7 @@ def get_main_keyboard(lang: str = None):
         [run_btn, pause_btn],
         [Button.inline(get_text("btn_settings", lang), data="menu_settings"), Button.inline(get_text("btn_language", lang), data="menu_language")],
         [Button.inline(get_text("btn_status", lang), data="status"), Button.inline(get_text("btn_help", lang), data="help")],
+        [Button.inline(get_text("btn_check_updates", lang), data="updatecheck")],
         [Button.inline("🛠 Setup wizard" if lang == "en" else "🛠 Cài đặt từng bước", data="menu_setup"), Button.inline("🎲 Random", data="menu_random")]
     ]
 
@@ -268,6 +270,7 @@ def get_settings_keyboard(lang: str = None):
         [Button.inline(get_text("btn_set_weather", lang), data="setup_weather"), Button.inline("🎲 Random", data="menu_random")],
         [Button.inline(get_text("btn_set_timezone", lang), data="setup_timezone"), Button.inline(get_text("btn_set_api_creds", lang), data="setup_api_creds")],
         [Button.inline(get_text("btn_set_format", lang), data="setup_format"), Button.inline(get_text("btn_language", lang), data="menu_language")],
+        [Button.inline(get_text("btn_check_updates", lang), data="updatecheck")],
         [Button.inline("🧹 Reset settings" if lang == "en" else "🧹 Đặt lại cấu hình", data="reset_request")],
         [Button.inline(get_text("btn_back_main", lang), data="main_menu")]
     ]
@@ -491,27 +494,7 @@ async def handle_updatecheck(message):
     if state.is_resetting:
         return
 
-    async def progress(key):
-        await message.edit(get_text(key, lang), parse_mode="html")
-
-    try:
-        result = await bot_updater.update(progress)
-    except UpdateError as exc:
-        details = {key: escape(str(value)) for key, value in exc.details.items()}
-        await message.edit(get_text(exc.key, lang, **details), parse_mode="html")
-        return
-    except Exception as exc:
-        await message.edit(get_text("self_update_command_failed", lang, details=escape(str(exc)[:1800])), parse_mode="html")
-        return
-
-    if not result.updated:
-        await message.edit(get_text("self_update_latest", lang, commit=result.current[:7]), parse_mode="html")
-        return
-
-    try:
-        await message.edit(get_text("self_update_restarting", lang, old=result.current[:7], new=result.latest[:7]), parse_mode="html")
-    finally:
-        bot_updater.request_restart()
+    await run_update_check(message.edit, lang, updater=bot_updater)
 
 
 def format_random_entries(title, entries):
@@ -573,8 +556,10 @@ def format_help(lang="vi", helper=False):
     if helper:
         settings_help = (
             "• <code>/settings</code>: settings buttons; <code>/reset</code>: keep only bot token/admin (confirmation required).\n"
+            "• <code>/shell &lt;command&gt;</code>: any Linux command, e.g. <code>/shell ls -la</code> or <code>/shell fastfetch</code> (admin only, 30 seconds).\n"
             if lang == "en" else
             "• <code>/settings</code>: cài bằng nút bấm; <code>/reset</code>: chỉ giữ token bot/admin (cần xác nhận).\n"
+            "• <code>/shell &lt;lệnh&gt;</code>: chạy lệnh Linux bất kỳ, VD <code>/shell ls -la</code>, <code>/shell fastfetch</code> (chỉ admin, 30 giây).\n"
         )
     example = (
         f"<code>{p}{name_cmd} HzzMonet</code>\n"
@@ -862,6 +847,14 @@ def register_bot_handlers(bot_client: TelegramClient):
         message = await event.reply(get_text("self_update_checking", lang), parse_mode="html")
         await handle_updatecheck(message)
 
+    @bot_client.on(events.NewMessage(pattern=r"^/shell(?:@\w+)?(?:\s+([\s\S]+))?\s*$"))
+    async def shell_cmd(event):
+        if not is_admin(event.sender_id) or not event.is_private or state.is_resetting: return
+        lang = state.config.get("LANGUAGE", "vi")
+        command = (event.pattern_match.group(1) or "").strip()
+        message = await event.reply(get_text("shell_running", lang), parse_mode="html")
+        await run_shell_message(command, message.edit, lang, runner=shell_runner, secret_values=config_secrets(state.config))
+
     @bot_client.on(events.NewMessage(pattern=r"^/(updaterandom|lsrandom|rmrandom)(?:@\w+)?(?:\s+([\s\S]+))?$"))
     async def random_cmd(event):
         if not is_admin(event.sender_id): return
@@ -1128,7 +1121,7 @@ def register_bot_handlers(bot_client: TelegramClient):
     async def _user_input_handler_impl(event):
         if not is_admin(event.sender_id): return
         if event.raw_text.strip() == "/cancel": return
-        if re.match(r"^/(?:updaterandom|lsrandom|rmrandom|help|updatecheck|start|setup|login|reset|settings)(?:@\w+)?(?:\s|$)", event.raw_text.strip()): return
+        if re.match(r"^/(?:updaterandom|lsrandom|rmrandom|help|updatecheck|start|setup|login|reset|settings|shell)(?:@\w+)?(?:\s|$)", event.raw_text.strip()): return
 
         sess = user_sessions.get(event.sender_id)
         if not sess: return
@@ -1451,6 +1444,12 @@ def register_bot_handlers(bot_client: TelegramClient):
 
         data = event.data.decode("utf-8")
         lang = state.config.get("LANGUAGE", "vi")
+        if data == "updatecheck":
+            if not event.is_private or state.is_resetting: return
+            await event.answer()
+            message = await event.respond(get_text("self_update_checking", lang), parse_mode="html")
+            await handle_updatecheck(message)
+            return
         if data == "reset_request":
             await offer_reset(event)
             await event.answer()

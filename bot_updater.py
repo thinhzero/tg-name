@@ -9,7 +9,10 @@ import sys
 import tempfile
 import tokenize
 from dataclasses import dataclass
+from html import escape
 from pathlib import Path
+
+from i18n import get_text
 
 
 REPO_URL = "https://github.com/thinhzero/tg-name.git"
@@ -159,6 +162,29 @@ class BotUpdater:
 
 
 bot_updater = BotUpdater()
+
+
+async def run_update_check(edit, lang="vi", updater=bot_updater):
+    """Luồng cập nhật dùng chung cho tin nhắn Telethon và Bot API."""
+    async def progress(key):
+        await edit(get_text(key, lang), parse_mode="html")
+
+    try:
+        result = await updater.update(progress)
+    except UpdateError as exc:
+        details = {key: escape(str(value)) for key, value in exc.details.items()}
+        await edit(get_text(exc.key, lang, **details), parse_mode="html")
+        return
+    except Exception as exc:
+        await edit(get_text("self_update_command_failed", lang, details=escape(str(exc)[:1800])), parse_mode="html")
+        return
+    if not result.updated:
+        await edit(get_text("self_update_latest", lang, commit=result.current[:7]), parse_mode="html")
+        return
+    try:
+        await edit(get_text("self_update_restarting", lang, old=result.current[:7], new=result.latest[:7]), parse_mode="html")
+    finally:
+        updater.request_restart()
 
 
 async def _run_until_restart(main):

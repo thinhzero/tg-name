@@ -25,6 +25,43 @@ MONTHS = {
 }
 
 TEXTS: Dict[str, Dict[str, str]] = {
+    "btn_check_updates": {
+        "vi": "🔎 Kiểm tra cập nhật",
+        "en": "🔎 Check for updates"
+    },
+    "shell_usage": {
+        "vi": "💻 Dùng <code>/shell &lt;lệnh&gt;</code>, VD <code>/shell ls -la</code>, <code>/shell fastfetch</code>. Chỉ admin, chat riêng, Linux.",
+        "en": "💻 Use <code>/shell &lt;command&gt;</code>, e.g. <code>/shell ls -la</code> or <code>/shell fastfetch</code>. Admin only, private chat, Linux."
+    },
+    "shell_running": {
+        "vi": "⏳ Đang chạy lệnh Linux (tối đa 30 giây)...",
+        "en": "⏳ Running Linux command (up to 30 seconds)..."
+    },
+    "shell_linux_only": {
+        "vi": "⚠️ /shell chỉ hoạt động trên Linux.",
+        "en": "⚠️ /shell is only available on Linux."
+    },
+    "shell_busy": {
+        "vi": "⏳ Đang có một lệnh shell chạy. Chờ lệnh đó hoàn tất rồi thử lại.",
+        "en": "⏳ A shell command is already running. Wait for it to finish."
+    },
+    "shell_failed": {
+        "vi": "❌ Không chạy được lệnh shell. Kiểm tra quyền/thư mục chạy bot.",
+        "en": "❌ Could not run the shell command. Check the bot's permissions/working directory."
+    },
+    "shell_empty_output": {
+        "vi": "(không có output)",
+        "en": "(no output)"
+    },
+    "shell_timeout": {
+        "vi": "⏱ Lệnh quá 30 giây; đã dừng nhóm tiến trình.",
+        "en": "⏱ Command exceeded 30 seconds; its process group was stopped."
+    },
+    "shell_truncated": {
+        "vi": "✂️ Kết quả đã rút gọn; lệnh bị dừng nếu output vượt 64 KiB.",
+        "en": "✂️ Output was shortened; the command is stopped if output exceeds 64 KiB."
+    },
+
     "random_add_usage": {
         "vi": "🎲 Thêm bằng <code>.updaterandom eat29</code> (Helper Bot: <code>/updaterandom eat29</code>). Có thể gửi nhiều dòng, mỗi dòng một mục.",
         "en": "🎲 Use <code>.updaterandom eat29</code> (Helper Bot: <code>/updaterandom eat29</code>). Multiple lines are supported, one entry per line."
