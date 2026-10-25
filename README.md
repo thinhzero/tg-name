@@ -1,178 +1,265 @@
-# Telegram Name & Bio Auto Updater + Helper Bot
+# tg-name — Tự đổi tên và bio Telegram
 
-Hệ thống tự động cập nhật tên và bio (tiểu sử) tài khoản Telegram theo thời gian thực, thời tiết chi tiết đa nguồn và âm nhạc đang nghe (**Last.fm / Spotify / Apple Music**), tích hợp **Helper Bot** để điều khiển, xem trước bio, hỗ trợ song ngữ **Tiếng Việt 🇻🇳 & English 🇬🇧**, và cấu hình từ xa qua nút bấm trực quan.
+Chạy bằng **tài khoản Telegram của bạn** để cập nhật tên/bio khoảng mỗi phút. Ví dụ:
 
----
+```text
+HzzMonet | 11:35 - 25/10 | GMT +7 | eat29
+```
 
-## 🌐 Hỗ trợ Đa Ngôn Ngữ / Bilingual Support (Vietnamese & English)
+`eat29` được chọn ngẫu nhiên từ các dòng trong `name.txt`. Có thể thêm thời tiết, nhạc Last.fm
+và một Helper Bot riêng để điều khiển bằng nút bấm. **Helper Bot là tùy chọn.**
 
-Hệ thống hỗ trợ chuyển đổi linh hoạt giữa **Tiếng Việt** và **English**:
-- **Chuyển đổi tức thì**:
-  - Gõ lệnh Helper Bot: `/lang en` hoặc `/lang vi` (hoặc `/lang` để mở menu chọn).
-  - Gõ lệnh Userbot: `.lang en` hoặc `.lang vi`.
-  - Bấm nút **[🌐 Ngôn ngữ / Language]** trong Menu chính hoặc Menu Cài đặt của Helper Bot.
-- **Tự động dịch toàn diện**:
-  - Toàn bộ giao diện Bảng điều khiển (Dashboard), Menu Cài đặt, Thông báo, Hướng dẫn `/help`.
-  - Tự động địa phương hóa mô tả Thời tiết (OpenWeatherMap & wttr.in theo ngôn ngữ đã chọn).
-  - Tự động địa phương hóa thứ trong tuần: `{thu}`, `{thu_ngan}` (Tiếng Việt) và `{day}`, `{day_short}`, `{day_name}` (English).
-  - Lưu tùy chọn ngôn ngữ vào `LANGUAGE=vi` hoặc `LANGUAGE=en` trong `.env`.
+> Không chia sẻ `.env`, `SESSION_STRING`, file `*.session`, OTP hoặc mật khẩu 2FA.
+> Session cho phép truy cập tài khoản của bạn. Repo không cung cấp API key dùng chung.
 
----
+## 1. Cài đặt lần đầu
 
-## 📁 Cấu trúc thư mục
+**Cần có:** Python 3.10 trở lên, Git, kết nối mạng và tài khoản Telegram.
+Các lệnh trong khối `bash` bên dưới chạy ở **terminal trên máy/VPS**, không gửi vào Telegram.
 
-- `setup.py`: Công cụ tương tác trực quan cấu hình API, .env, đăng nhập Telegram, kiểm tra Helper Bot, OpenWeatherMap, wttr.in & Last.fm.
-- `name.py`: Script chính khởi chạy hệ thống (tự động phát hiện và chạy Profile Updater + Helper Bot song song).
-- `helper_bot.py`: Module Helper Bot với giao diện nút bấm inline, xem trước Bio chuyên sâu, thẻ thời tiết chi tiết và wizard đăng nhập.
-- `profile_engine.py`: Bộ máy xử lý và áp dụng cập nhật Tên & Bio lên Telegram, tích hợp OpenWeatherMap + wttr.in fallback và Last.fm Scrobbler.
-- `updater_state.py`: Quản lý trạng thái chia sẻ (status, pause, reload env, force update event, now playing music, weather data).
-- `generate_session.py`: Script hỗ trợ đăng nhập lấy `SESSION_STRING`.
-- `.env`: File cấu hình biến môi trường thực tế.
-- `.env.example`: File mẫu biến môi trường.
-- `requirements.txt`: Danh sách thư viện Python.
-
----
-
-## 🌤️ Nâng cấp Thời tiết Chi tiết & Tự động Đa Nguồn
-
-Hệ thống hỗ trợ lấy thời tiết theo thời gian thực:
-- **Tự động không cần API Key**: Tự động fallback sang nguồn `wttr.in` với mô tả tiếng Việt chuẩn xác (nhiệt độ, cảm giác thực tế, độ ẩm, tốc độ gió).
-- **Hỗ trợ OpenWeatherMap**: Cung cấp đầy đủ thông số áp suất, bình minh, hoàng hôn khi cấu hình `WEATHER_API`.
-- **Thẻ thời tiết trực quan**: Xem nhanh bằng lệnh `/weather` hoặc nút `[🌤️ Thời tiết chi tiết]` trên Helper Bot.
-- **Tự động cân đối độ dài Bio**: Placeholder `{weather}` tự động rút gọn để đảm bảo không vượt quá giới hạn 70 ký tự của Telegram.
-
----
-
-## 📝 Tính năng Xem trước Bio (Bio Preview)
-
-Telegram giới hạn Bio tài khoản tối đa **70 ký tự**:
-- Lệnh `/previewbio` (hoặc `/bio`): Đánh giá chính xác độ dài ký tự của mẫu `BIO_FORMAT`.
-- **Mô phỏng đa kịch bản**:
-  1. *Khi đang phát nhạc*: Hiển thị bài hát từ Last.fm/Spotify.
-  2. *Khi không nghe nhạc / ở chế độ chờ*: Tự chuyển sang hiển thị thời tiết hoặc trạng thái.
-- Đưa ra cảnh báo trực quan `🟢 Hợp lệ` hoặc `🔴 VƯỢT GIỚI HẠN 70 KÝ TỰ` kèm số ký tự thừa/thiếu.
-
----
-
-## 🎵 Tính năng Tích hợp Âm nhạc Last.fm (Spotify / Apple Music)
-
-Bot tự động lấy thông tin bài hát bạn đang nghe theo thời gian thực từ Last.fm:
-- Hỗ trợ **Spotify, Apple Music, YouTube Music, Deezer, Tidal**... (bất kỳ trình phát nào liên kết với Last.fm).
-- Thẻ đặc biệt `{music_or_weather}`: Tự động hiển thị bài hát khi bạn đang nghe nhạc; tự động chuyển sang hiển thị thời tiết khi bạn tắt nhạc!
-- Kiểm tra bài hát đang phát tức thì bằng lệnh `/music` hoặc `.music`.
-- API Key mặc định đã có sẵn, bạn chỉ cần nhập Last.fm Username (`/lastfm <username>`).
-
----
-
-## 🎨 Tùy biến Tên (BASE_NAME) & Định dạng hiển thị
-
-Hệ thống hỗ trợ tùy biến định dạng tên và bio linh hoạt với các từ khóa ngày giờ, thời tiết và âm nhạc:
-
-### 1. Các từ khóa hỗ trợ:
-| Từ khóa | Ý nghĩa | Ví dụ |
-| :--- | :--- | :--- |
-| `{base_name}` | Tên cố định bạn cài đặt | `HzzMonet` |
-| `HH` / `{HH}` | Giờ 24h (00 - 23) | `21` |
-| `mm` / `{mm}` | Phút (00 - 59) | `09` |
-| `ss` / `{ss}` | Giây (00 - 59) | `45` |
-| `hh` / `{hh}` | Giờ 12h (01 - 12) | `09` |
-| `ampm` | Buổi (AM / PM) | `PM` |
-| `DD` / `{DD}` | Ngày trong tháng (01 - 31) | `12` |
-| `MM` / `{MM}` | Tháng trong năm (01 - 12) | `09` |
-| `YYYY` / `{YYYY}` | Năm 4 chữ số | `2026` |
-| `YY` / `{YY}` | Năm 2 chữ số | `26` |
-| `{thu}` | Thứ tiếng Việt | `Thứ Bảy` |
-| `{thu_ngan}` | Thứ ngắn tiếng Việt | `T7` |
-| `{day}` / `{day_name}` | Thứ tiếng Anh (English weekday) | `Saturday` |
-| `{day_short}` | Thứ ngắn tiếng Anh (English short day) | `Sat` |
-| `{city}` | Tên tỉnh / thành phố | `Bac Ninh` |
-| `{weather}` | Chuỗi thời tiết tự động cân đối cho Bio | `📍 Bac Ninh` |
-| `{weather_short}` | Thời tiết siêu ngắn (Icon + Nhiệt độ) | `⛅ 28°C` |
-| `{weather_medium}` | Thời tiết vừa (Icon + Tỉnh + Nhiệt + Ẩm) | `⛅ Hanoi 28°C \| 75%` |
-| `{weather_full}` | Toàn bộ thông số thời tiết chi tiết | `📍 Hanoi: ⛅ 28°C \| 75% \| 3m/s` |
-| `{temp}` / `{nhiet_do}` | Nhiệt độ hiện tại | `28°C` |
-| `{feels_like}` / `{cam_giac}` | Cảm giác thực tế | `30°C` |
-| `{humidity}` / `{do_am}` | Độ ẩm không khí | `75%` |
-| `{wind}` / `{gio_toc}` | Tốc độ gió | `3.5m/s` |
-| `{weather_desc}` | Mô tả tình trạng thời tiết | `Mây thưa` |
-| `{weather_icon}` | Icon thời tiết | `⛅` |
-| `{sunrise}` / `{sunset}` | Giờ bình minh / hoàng hôn | `05:42` / `18:05` |
-| `{music}` | Bài hát đang nghe (kèm icon 🎧/🎵) | `🎧 Blinding Lights - The Weeknd` |
-| `{music_or_weather}` | Ưu tiên nhạc khi phát, về thời tiết khi tắt | `🎧 Blinding Lights - The Weeknd` |
-| `{track}` | Tên bài hát | `Blinding Lights` |
-| `{artist}` | Tên nghệ sĩ/ca sĩ | `The Weeknd` |
-| `{album}` | Tên album | `After Hours` |
-| `{scrobbles}` | Tổng số bài đã nghe trên Last.fm | `14250` |
-
-### 2. Các mẫu định dạng phổ biến:
-- `HzzMonet | HH:mm - DD/MM/YYYY` ➡️ **HzzMonet | 21:09 - 12/09/2026**
-- `{base_name} | {music_or_weather}` ➡️ **HzzMonet | 🎧 Blinding Lights - The Weeknd**
-- `{music_or_weather} ⏰ HH:mm` ➡️ **🎧 Blinding Lights - The Weeknd ⏰ 21:09**
-- `📍 {city} • {weather_short} ⏰ HH:mm` ➡️ **📍 Bac Ninh • ⛅ 28°C ⏰ 21:09**
-- `{music_or_weather} | 📍 {city}` ➡️ **🎧 Blinding Lights - The Weeknd | 📍 Bac Ninh**
-- `{base_name} | {thu}, DD/MM/YYYY - HH:mm` ➡️ **HzzMonet | Thứ Bảy, 12/09/2026 - 21:09**
-- `{base_name} | {day}, DD/MM/YYYY - HH:mm` ➡️ **HzzMonet | Saturday, 12/09/2026 - 21:09**
-- `{base_name} ⏰ HH:mm (DD/MM)` ➡️ **HzzMonet ⏰ 21:09 (12/09)**
-- `{base_name} | {thu_ngan} • HH:mm` ➡️ **HzzMonet | T7 • 21:09**
-- `{base_name} | {day_short} • HH:mm` ➡️ **HzzMonet | Sat • 21:09**
-
----
-
-## 🤖 Điều khiển qua Helper Bot (@BotFather)
-
-Khi nhắn tin riêng với bot của bạn trên Telegram:
-- `/start` - Bật bảng điều khiển với các nút Inline:
-  - 🔄 **Cập nhật ngay**: Kích hoạt đổi tên & bio ngay lập tức.
-  - 👁️ **Xem trước Profile**: Kiểm tra hiển thị cả Tên & Bio.
-  - 📝 **Xem trước Bio**: Kiểm tra chuyên sâu độ dài 70 ký tự và kịch bản nhạc/thời tiết.
-  - 🌤️ **Thời tiết chi tiết**: Mở thẻ thông số thời tiết đầy đủ của thành phố.
-  - 🌐 **Ngôn ngữ**: Đổi giao diện sang Tiếng Việt 🇻🇳 hoặc English 🇬🇧.
-  - ✏️ **Đổi tên (BASE_NAME)**: Nhập tên mới bất kỳ lúc nào.
-  - 🎵 **Last.fm**: Cài đặt username Last.fm để nghe nhạc.
-  - 🎨 **Mẫu hiển thị (Format)**: Bấm chọn các mẫu có sẵn (Mẫu 1-8) hoặc tự nhập mẫu riêng.
-  - ⏸️/▶️ **Tạm dừng / Tiếp tục**: Tạm ngừng hoặc kích hoạt lại auto-update.
-- `/lang <en|vi>`: Đổi ngôn ngữ bot (Tiếng Việt / English).
-- `/previewbio` (hoặc `/bio`): Mở thẻ phân tích và xem trước tiểu sử.
-- `/weather`: Xem thông tin thời tiết chi tiết.
-- `/lastfm <username>`: Kết nối tài khoản Last.fm.
-- `/music` (hoặc `/nowplaying`): Xem thông tin bài hát đang phát.
-- `/setname <tên>` (hoặc `/basename <tên>`): Đổi tên nhanh (ví dụ: `/setname HzzMonet`).
-- `/nameformat <mẫu>`: Đổi mẫu định dạng tên (ví dụ: `/nameformat {base_name} | HH:mm - DD/MM/YYYY`).
-- `/bioformat <mẫu>`: Đổi mẫu định dạng bio (ví dụ: `/bioformat {music_or_weather} ⏰ HH:mm`).
-- `/setcity <thành phố>`: Đổi thành phố thời tiết.
-- `/help` - Xem cẩm nang hướng dẫn đầy đủ từ khóa và ví dụ.
-
----
-
-## ⚡ Tự gõ lệnh trên Userbot (Không cần Bot Token)
-Gõ trực tiếp trong **Saved Messages** hoặc bất kỳ đoạn chat nào:
-- `.lang <en|vi>` : Đổi ngôn ngữ (Tiếng Việt / English).
-- `.bio` / `.previewbio` : Xem trước Bio & kiểm tra độ dài 70 ký tự.
-- `.weather` : Xem chi tiết thời tiết (nhiệt độ, cảm giác thực tế, độ ẩm, gió, bình minh...).
-- `.preview` : Xem trước Tên và Bio hiện tại.
-- `.lastfm <username>` : Kết nối tài khoản Last.fm.
-- `.music` : Xem bài hát đang phát.
-- `.name <tên mới>` : Đổi `BASE_NAME` (ví dụ: `.name HzzMonet`).
-- `.nameformat <mẫu>` : Đổi mẫu tên (ví dụ: `.nameformat {base_name} | HH:mm - DD/MM/YYYY`).
-- `.bioformat <mẫu>` : Đổi mẫu bio (ví dụ: `.bioformat {music_or_weather} ⏰ HH:mm`).
-- `.city <thành phố>` : Đổi thành phố thời tiết.
-- `.update` : Cập nhật profile ngay lập tức.
-- `.status` : Xem thông tin trạng thái.
-- `.pause` / `.resume` : Tạm dừng / tiếp tục.
-- `.help` : Bảng trợ giúp lệnh.
-
----
-
-## 🚀 Khởi chạy hệ thống
+### Bước 1 — Tải code và cài thư viện
 
 ```bash
-# Cấu hình qua giao diện Setup Wizard
-python3 setup.py
+git clone https://github.com/thinhzero/tg-name.git
+cd tg-name
+python3 -m venv .venv
+source .venv/bin/activate
+python -m pip install -r requirements.txt
+```
 
-# Khởi chạy trực tiếp (Chạy cả Profile Updater + Helper Bot)
-python3 name.py
+Nếu Ubuntu/Debian báo thiếu `venv`, cài gói `python3-venv` rồi thử lại.
+Các ví dụ terminal còn lại giả sử bạn đang ở thư mục `tg-name` và đã kích hoạt `.venv`.
 
-# Hoặc khởi chạy nền với PM2
-pm2 start name.py --name "tele-updater" --interpreter python3
+### Bước 2 — Cấu hình và đăng nhập
+
+```bash
+python setup.py
+```
+
+Chọn **1 — Cài đặt từng bước**, sau đó:
+
+1. Mở https://my.telegram.org/apps, tạo ứng dụng và lấy **API_ID**, **API_HASH của riêng bạn**.
+   Nhập hai giá trị vào wizard. Không có giá trị mặc định cho hai mục này.
+2. Chọn đăng nhập Telegram. Nhập số điện thoại kèm mã quốc gia, mã xác nhận và 2FA nếu có.
+   Wizard tự lưu `SESSION_STRING` vào `.env`; không cần tự sao chép chuỗi session.
+3. Ở mục Helper Bot: **để trống BOT_TOKEN nếu chưa cần bot riêng**. Nếu muốn dùng,
+   lấy token từ https://t.me/BotFather và nhập `ADMIN_ID` là ID số của chính bạn.
+   Wizard tự có ID này nếu bước đăng nhập đã thành công.
+4. Thời tiết: nhập thành phố. Có thể để trống `WEATHER_API` để dùng `wttr.in`.
+5. Nhạc: nếu không dùng, bỏ qua. Nếu dùng, cần cả Last.fm username và API key riêng.
+6. Nhập tên cố định, ví dụ `HzzMonet`. Với múi giờ Việt Nam chọn `Asia/Ho_Chi_Minh`.
+   Nhấn Enter ở mẫu tên để dùng mẫu tên + giờ + GMT + random như ví dụ đầu trang.
+7. Ở câu hỏi khởi chạy cuối wizard, chọn **1** để chạy ngay.
+
+Khi nhập API hash/token/key, terminal không hiện ký tự — đây là chủ ý, không phải bị treo.
+Nếu đã thoát wizard, khởi chạy bằng:
+
+```bash
+python name.py
+```
+
+**Chỉ chạy một bản bot cho cùng tài khoản/session.** Không mở thêm `name.py` nếu wizard
+hoặc PM2 đã chạy bot. Nhấn `Ctrl+C` để dừng bản đang chạy ở terminal.
+
+### Bước 3 — Kiểm tra trên Telegram
+
+Mở **Saved Messages / Tin nhắn đã lưu** của tài khoản vừa đăng nhập và tự gửi:
+
+```text
+.status
+.preview
+```
+
+Các lệnh bắt đầu bằng dấu **`.`** do chính tài khoản Userbot gửi. Bạn bè gửi lệnh không
+điều khiển được Userbot. Các lệnh bắt đầu bằng **`/`** chỉ dùng khi nhắn riêng Helper Bot.
+
+## 2. Dùng đúng mẫu tên có random
+
+Gửi **từng lệnh riêng** trong Saved Messages:
+
+```text
+.name HzzMonet
+.nameformat {base_name} | HH:mm - DD/MM | {gmt} | {random}
+.updaterandom sleep
+.updaterandom đang ăn
+.lsrandom
+.update
+```
+
+- Thay `HzzMonet` bằng tên của bạn.
+- Giữ nguyên `{base_name}`, `{gmt}`, `{random}` trong lệnh mẫu: bot sẽ tự điền chúng.
+- `{gmt}` dùng múi giờ đã chọn; `Asia/Ho_Chi_Minh` cho kết quả `GMT +7`.
+- `.update` đổi **tên/bio ngay**, không phải cập nhật mã nguồn.
+
+### Thêm / xem / xóa random
+
+| Việc cần làm | Lệnh trên Userbot |
+| --- | --- |
+| Thêm một mục | `.updaterandom nội dung mới` |
+| Xem toàn bộ mục và UID | `.lsrandom` |
+| Xóa một mục | `.rmrandom UID` |
+
+Ví dụ kết quả `.lsrandom`:
+
+```text
+UID — Nội dung
+a1b2c3d4e5f6 — sleep
+```
+
+Để xóa mục đó, gửi `.rmrandom a1b2c3d4e5f6`. **Dùng UID thực bot trả về**, không dùng UID
+mẫu trên. UID là mã của mục random, không phải ID tài khoản Telegram.
+
+Có thể thêm nhiều mục trong **một tin nhắn nhiều dòng**:
+
+```text
+.updaterandom uống trà
+đọc sách
+đang ngủ
+```
+
+Mỗi dòng là một mục; dòng trống và nội dung trùng bị bỏ qua. Lần đầu dùng, bot tự tạo
+`name.txt` từ `name.example.txt` với mục mẫu `eat29`, nên thêm lại `eat29` sẽ báo đã có.
+Bạn cũng có thể sửa `name.txt` trực tiếp. Bot đọc lại ở mỗi lần cập nhật và có thể chọn
+lặp lại mục trước. UID không đổi khi sắp xếp/thêm/xóa mục khác; sửa nội dung sẽ đổi UID.
+Nếu xóa hết mục, `{random}` trở thành chuỗi rỗng, không tự khôi phục mục mẫu.
+
+## 3. Các lệnh thường dùng
+
+Helper Bot chỉ nhận lệnh trong **chat riêng**, từ `ADMIN_ID` đã cấu hình.
+
+| Mục đích | Userbot | Helper Bot |
+| --- | --- | --- |
+| Hướng dẫn | `.help` | `/help` |
+| Trạng thái | `.status` | `/status` hoặc `/start` |
+| Xem trước tên và bio | `.preview` | `/preview` |
+| Cập nhật tên/bio ngay | `.update` | `/update` |
+| Tạm dừng / tiếp tục | `.pause` / `.resume` | `/pause` / `/resume` |
+| Đổi tên cố định | `.name tên mới` | `/setname tên mới` |
+| Đổi mẫu tên | `.nameformat mẫu` | `/nameformat mẫu` |
+| Đổi mẫu bio | `.bioformat mẫu` | `/bioformat mẫu` |
+| Xem bio và độ dài | `.previewbio` | `/previewbio` |
+| Thêm random | `.updaterandom nội dung` | `/updaterandom nội dung` |
+| Danh sách random | `.lsrandom` | `/lsrandom` |
+| Xóa random | `.rmrandom UID` | `/rmrandom UID` |
+| Đổi thành phố | `.city Hanoi` | `/setcity Hanoi` |
+| Xem thời tiết | `.weather` | `/weather` |
+| Đặt Last.fm username | `.lastfm username` | `/lastfm username` |
+| Xem nhạc | `.music` | `/music` |
+| Đổi ngôn ngữ | `.lang vi` / `.lang en` | `/lang vi` / `/lang en` |
+| Cập nhật code và restart | `.updatecheck` | `/updatecheck` |
+
+Trên Helper Bot, `/cancel` hủy thao tác nhập đang dang dở. Đăng nhập qua terminal được
+khuyến nghị; nếu dùng wizard đăng nhập qua chat, không chuyển tiếp OTP/2FA và xóa tin nhắn
+nhạy cảm sau khi hoàn tất. Không gửi token/API key trong nhóm hoặc ảnh chụp màn hình.
+
+### Các từ khóa để viết mẫu tên / bio
+
+| Từ khóa | Ý nghĩa |
+| --- | --- |
+| `{base_name}` | Tên cố định đã đặt bằng `.name` |
+| `{random}` | Một dòng ngẫu nhiên trong `name.txt` |
+| `{gmt}` | GMT của múi giờ hiện tại, ví dụ `GMT +7` |
+| `HH:mm`, `HH:mm:ss` | Giờ:phút, hoặc giờ:phút:giây |
+| `DD/MM`, `DD/MM/YYYY` | Ngày/tháng, hoặc ngày/tháng/năm |
+| `hh`, `ampm` | Giờ 12 tiếng, AM/PM |
+| `{thu}`, `{thu_ngan}` | Thứ đầy đủ / viết gọn theo ngôn ngữ |
+| `{day}`, `{day_short}` | Thứ tiếng Anh đầy đủ / viết gọn |
+| `{city}` | Thành phố |
+| `{weather}`, `{weather_short}`, `{weather_medium}`, `{weather_full}` | Thời tiết các mức độ dài |
+| `{temp}`, `{feels_like}`, `{humidity}`, `{wind}` | Nhiệt độ, cảm giác thực, độ ẩm, gió |
+| `{weather_desc}`, `{weather_icon}`, `{sunrise}`, `{sunset}` | Mô tả, icon, bình minh, hoàng hôn |
+| `{music}`, `{track}`, `{artist}`, `{album}`, `{scrobbles}` | Dữ liệu Last.fm |
+| `{music_or_weather}` | Nhạc khi đang phát; thời tiết khi không phát |
+
+Ví dụ đổi bio: `.bioformat {music_or_weather} ⏰ HH:mm`.
+Bot cắt tên ở **64 ký tự**, bio ở **70 ký tự**. Có `ss` trong mẫu không làm bot đổi mỗi giây;
+chu kỳ tự động vẫn khoảng một phút, có thể lâu hơn nếu Telegram yêu cầu chờ.
+
+## 4. File `.env`: mục nào cần điền?
+
+`.env.example` cố ý **để trống tất cả giá trị**. Wizard tạo `.env` thật trên máy bạn.
+Nếu muốn tự chỉnh, sao chép `.env.example` thành `.env` rồi điền bằng trình soạn thảo.
+Không ghi key/token vào lệnh shell hoặc gửi chúng lên GitHub.
+
+| Biến | Bắt buộc? / mặc định khi trống |
+| --- | --- |
+| `API_ID`, `API_HASH` | Bắt buộc, lấy riêng tại my.telegram.org/apps |
+| `SESSION_STRING` | Wizard tự lưu sau khi đăng nhập; cũng hỗ trợ file session cục bộ |
+| `SESSION_NAME` | `bot` — dùng khi đăng nhập bằng file session |
+| `BOT_TOKEN` | Tùy chọn; để trống thì chỉ chạy Userbot |
+| `ADMIN_ID` | Bắt buộc khi dùng Helper Bot; ID số của chính bạn |
+| `BASE_NAME` | Tên của bạn; mặc định là chữ `tên` nếu chưa đặt |
+| `TIMEZONE`, `LANGUAGE` | `Asia/Ho_Chi_Minh`, `vi` |
+| `NAME_FORMAT` | `{base_name} \| HH:mm - DD/MM \| {gmt} \| {random}` |
+| `BIO_FORMAT` | `{weather} ⏰ HH:mm` |
+| `CITY` | `Bac Ninh`; đổi sang thành phố của bạn nếu dùng thời tiết |
+| `WEATHER_API` | Tùy chọn: key riêng OpenWeatherMap; không có thì dùng wttr.in |
+| `LASTFM_USERNAME`, `LASTFM_API_KEY` | Tùy chọn, nhưng muốn lấy nhạc phải có cả hai |
+
+Key Last.fm: https://www.last.fm/api/account/create. Liên kết trình nghe nhạc với Last.fm
+hoặc cài scrobbler trước; bot không đăng nhập trực tiếp Spotify/Apple Music.
+Key thời tiết: https://home.openweathermap.org/api_keys. Nếu cả nguồn thời tiết đều lỗi,
+bot chỉ hiện tên thành phố. Sau khi sửa `.env` bằng tay, khởi động lại bot để nạp cấu hình.
+
+## 5. Chạy nền và cập nhật
+
+Nếu máy đã cài PM2, chạy từ thư mục repo (dừng bản terminal trước):
+
+```bash
+pm2 start name.py --name tg-name --interpreter "$PWD/.venv/bin/python" --cwd "$PWD"
 pm2 save
 ```
+
+- Xem log: `pm2 logs tg-name`.
+- Khởi động lại sau khi sửa cấu hình: `pm2 restart tg-name`.
+- Dừng: `pm2 stop tg-name`.
+
+Gửi `.updatecheck` trên Userbot hoặc `/updatecheck` cho Helper Bot để cập nhật code.
+Bot kiểm tra nhánh **main** của https://github.com/thinhzero/tg-name. Nếu có bản mới,
+bot clone tạm, kiểm tra cú pháp Python, cài thư viện nếu `requirements.txt` thay đổi,
+cập nhật fast-forward rồi tự restart. Không có bản mới thì không restart.
+
+`.env`, `name.txt`, session và remote `origin` được giữ nguyên. Nếu code đã sửa cục bộ,
+có commit riêng hoặc file mới trùng file của bạn, bot dừng cập nhật thay vì ghi đè.
+Hãy lưu/giải quyết các sửa đổi đó thủ công; **không cần `git reset --hard`**.
+Tải/cài lỗi sẽ không restart; pip có thể đã thay đổi một phần thư viện trước khi báo lỗi.
+Máy cần Git, quyền ghi repo và quyền cài thư viện trong virtualenv.
+
+Nếu bản cũ chưa có `.updatecheck`: dừng bot, chạy `git pull --ff-only` và
+`python -m pip install -r requirements.txt`, rồi khởi động lại bằng cách bạn đang dùng.
+Repo này công khai nên chức năng cập nhật **không cần GitHub token**.
+
+## 6. Khi gặp lỗi
+
+| Triệu chứng | Cách xử lý |
+| --- | --- |
+| Thiếu API_ID/API_HASH | Chạy `python setup.py`, dùng API riêng, không dùng key cũ có sẵn trên mạng |
+| Chưa đăng nhập / session hết hạn | Chạy lại bước đăng nhập trong `setup.py` |
+| Helper Bot báo thiếu ADMIN_ID | Điền ID số của bạn; bot không cấp admin cho người nhắn đầu tiên |
+| `.status` không trả lời | Dùng chính tài khoản đã đăng nhập, kiểm tra tiến trình còn chạy |
+| Thiếu module Python | Kích hoạt `.venv`, cài lại `requirements.txt`, dùng đúng interpreter của PM2 |
+| Tên/bio bị cắt | Rút ngắn mẫu hoặc random; xem `.preview` / `.previewbio` |
+| Báo FloodWait | Chờ đúng thời gian Telegram yêu cầu; không spam `.update` hoặc chạy nhiều bản |
+| Nhạc không hiện | Kiểm tra username, API key riêng và scrobbler Last.fm |
+| `.updatecheck` bị từ chối | Xem sửa đổi bằng `git status` / `git diff`; sao lưu rồi xử lý thủ công |
+
+## 7. Bảo mật và kiểm thử
+
+- `.gitignore` chặn `.env`/bản sao env, session, `name.txt`, virtualenv, log và cache.
+  Trước khi commit vẫn nên kiểm tra `git status` và `git diff --cached`.
+- API hash/key từng được ghi cứng trong các commit cũ. Bản hiện tại đã bỏ chúng;
+  **xóa khỏi bản mới không xóa khỏi lịch sử Git**. Nếu là key của bạn, hãy đổi/thu hồi.
+- Nếu session Telegram lộ: vào **Settings → Devices** để chấm dứt phiên tương ứng.
+  Nếu bot token hoặc token GitHub lộ: thu hồi tại dịch vụ cấp token, không chỉ xóa file.
+- Không đăng log có key/OTP/session. Helper Bot không hiển thị lại API hash/key đã lưu.
+
+Kiểm thử không cần đăng nhập Telegram hay gọi GitHub thật:
+
+```bash
+python -m unittest discover -s tests -v
+```
+
+`name.py` là file chạy chính; `setup.py` là wizard. `generate_session.py` là lựa chọn phụ
+để đăng nhập và lưu session vào `.env` mà không in session ra terminal. Các file `*_engine`,
+`*_state`, `helper_bot.py`, `bot_updater.py`, `random_names.py`, `i18n.py` là module của bot,
+không cần chạy từng file riêng.

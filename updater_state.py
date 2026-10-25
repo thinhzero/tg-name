@@ -7,6 +7,7 @@ import asyncio
 from dotenv import load_dotenv
 
 ENV_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), ".env")
+DEFAULT_NAME_FORMAT = "{base_name} | HH:mm - DD/MM | {gmt} | {random}"
 
 class UpdaterState:
     def __init__(self):
@@ -39,28 +40,28 @@ class UpdaterState:
     def reload_config(self):
         """Tải lại biến môi trường từ .env"""
         load_dotenv(ENV_FILE, override=True)
-        bio_val = os.getenv("BIO_FORMAT", "{weather} ⏰ HH:mm")
-        if bio_val:
-            bio_val = bio_val.replace("\\n", "\n")
-        name_val = os.getenv("NAME_FORMAT", "{base_name} | HH:mm - DD/MM/YYYY")
-        if name_val:
-            name_val = name_val.replace("\\n", "\n")
+
+        def value(key, default=""):
+            return os.getenv(key, "").strip() or default
+
+        bio_val = value("BIO_FORMAT", "{weather} ⏰ HH:mm").replace("\\n", "\n")
+        name_val = value("NAME_FORMAT", DEFAULT_NAME_FORMAT).replace("\\n", "\n")
         self.config = {
-            "API_ID": os.getenv("API_ID", "2040").strip(),
-            "API_HASH": os.getenv("API_HASH", "b18441a1ff607e10a989891a5462e627").strip(),
-            "SESSION_STRING": os.getenv("SESSION_STRING", "").strip(),
-            "SESSION_NAME": os.getenv("SESSION_NAME", "bot").strip(),
-            "BOT_TOKEN": os.getenv("BOT_TOKEN", "").strip(),
-            "ADMIN_ID": os.getenv("ADMIN_ID", "").strip(),
-            "WEATHER_API": os.getenv("WEATHER_API", "").strip(),
-            "CITY": os.getenv("CITY", "Bac Ninh").strip(),
-            "LASTFM_API_KEY": os.getenv("LASTFM_API_KEY", "b25b959554ed76058ac220b7b2e0a026").strip(),
-            "LASTFM_USERNAME": os.getenv("LASTFM_USERNAME", "").strip(),
-            "BASE_NAME": os.getenv("BASE_NAME", "tên").strip(),
-            "TIMEZONE": os.getenv("TIMEZONE", "Asia/Ho_Chi_Minh").strip(),
+            "API_ID": value("API_ID"),
+            "API_HASH": value("API_HASH"),
+            "SESSION_STRING": value("SESSION_STRING"),
+            "SESSION_NAME": value("SESSION_NAME", "bot"),
+            "BOT_TOKEN": value("BOT_TOKEN"),
+            "ADMIN_ID": value("ADMIN_ID"),
+            "WEATHER_API": value("WEATHER_API"),
+            "CITY": value("CITY", "Bac Ninh"),
+            "LASTFM_API_KEY": value("LASTFM_API_KEY"),
+            "LASTFM_USERNAME": value("LASTFM_USERNAME"),
+            "BASE_NAME": value("BASE_NAME", "tên"),
+            "TIMEZONE": value("TIMEZONE", "Asia/Ho_Chi_Minh"),
             "NAME_FORMAT": name_val.strip(),
             "BIO_FORMAT": bio_val.strip(),
-            "LANGUAGE": os.getenv("LANGUAGE", "vi").strip().lower()
+            "LANGUAGE": value("LANGUAGE", "vi").lower()
         }
 
     def update_config(self, updates: dict):
@@ -95,6 +96,8 @@ class UpdaterState:
                 new_lines.append(f"{k}={format_env_val(v)}\n")
 
         with open(ENV_FILE, "w", encoding="utf-8") as f:
+            if os.name == "posix":
+                os.fchmod(f.fileno(), 0o600)
             f.writelines(new_lines)
 
         self.reload_config()

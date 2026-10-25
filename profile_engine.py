@@ -13,7 +13,8 @@ from telethon.sessions import StringSession
 from telethon.tl.functions.account import UpdateProfileRequest
 from telethon.errors import FloodWaitError, AboutTooLongError
 
-from updater_state import state
+from updater_state import state, DEFAULT_NAME_FORMAT
+from random_names import random_names
 
 def get_weather_icon(desc: str) -> str:
     d = (desc or "").lower()
@@ -58,7 +59,7 @@ async def get_detailed_weather(city: str, weather_api_key: str, timezone: str, l
 
     # 1. Thử qua OpenWeatherMap nếu có API Key
     if weather_api_key and weather_api_key != "lấy ở openweathermap":
-        url = f"http://api.openweathermap.org/data/2.5/weather?q={urllib.parse.quote(city)}&appid={weather_api_key}&units=metric&lang={lang_code}"
+        url = f"https://api.openweathermap.org/data/2.5/weather?q={urllib.parse.quote(city)}&appid={weather_api_key}&units=metric&lang={lang_code}"
         try:
             async with aiohttp.ClientSession() as session:
                 async with session.get(url, timeout=aiohttp.ClientTimeout(total=6)) as resp:
@@ -189,12 +190,12 @@ async def get_weather(city: str, weather_api_key: str, timezone: str) -> str:
     w = await get_detailed_weather(city, weather_api_key, timezone)
     return w.get("formatted", f"📍 {city}")
 
-async def get_lastfm_track(username: str, api_key: str = "b25b959554ed76058ac220b7b2e0a026") -> dict:
+async def get_lastfm_track(username: str, api_key: str = "") -> dict:
     """Lấy bài hát đang nghe hoặc bài hát gần nhất từ Last.fm"""
-    if not username:
+    if not username or not api_key:
         return {"is_playing": False, "track": "", "artist": "", "album": "", "scrobbles": "", "formatted": ""}
 
-    key = api_key or "b25b959554ed76058ac220b7b2e0a026"
+    key = api_key
     import urllib.parse
     url = f"https://ws.audioscrobbler.com/2.0/?method=user.getrecenttracks&user={urllib.parse.quote(username)}&api_key={key}&format=json&limit=1"
 
@@ -233,7 +234,7 @@ async def get_lastfm_track(username: str, api_key: str = "b25b959554ed76058ac220
         print(f"[LỖI Last.fm]: {e}")
         return {"is_playing": False, "track": "", "artist": "", "album": "", "scrobbles": "", "formatted": ""}
 
-def render_format(template: str, base_name: str, weather, city: str, tz_str: str, music_info: dict = None) -> str:
+def render_format(template: str, base_name: str, weather, city: str, tz_str: str, music_info: dict = None, random_text: str = None) -> str:
     """Định dạng chuỗi Name/Bio hỗ trợ cả thẻ {tag}, nhạc Last.fm và các từ khóa thời gian như HH:mm - DD/MM/YYYY"""
     try:
         tz = pytz.timezone(tz_str)
@@ -269,6 +270,10 @@ def render_format(template: str, base_name: str, weather, city: str, tz_str: str
     val_ampm = now.strftime("%p")
     val_ngay = now.strftime("%d/%m")
     val_gio = now.strftime("%H:%M")
+    offset_minutes = int(now.utcoffset().total_seconds() // 60)
+    offset_hours, offset_remainder = divmod(abs(offset_minutes), 60)
+    offset_sign = "+" if offset_minutes >= 0 else "-"
+    val_gmt = f"GMT {offset_sign}{offset_hours}" + (f":{offset_remainder:02d}" if offset_remainder else "")
 
     # Xử lý dữ liệu thời tiết chi tiết
     weather_dict = weather if isinstance(weather, dict) else (state.weather_data or {})
@@ -298,12 +303,10 @@ def render_format(template: str, base_name: str, weather, city: str, tz_str: str
 
     if is_playing and val_music:
         val_music_or_weather = val_music
-    elif val_music:
-        val_music_or_weather = val_music
     else:
         val_music_or_weather = weather_str
 
-    res = template or "{base_name} | HH:mm - DD/MM/YYYY"
+    res = template or DEFAULT_NAME_FORMAT
     res = res.replace("\\n", "\n")
 
     # 1. Thay thế các thẻ dạng {tag}
@@ -328,6 +331,7 @@ def render_format(template: str, base_name: str, weather, city: str, tz_str: str
         ("{gio12}", f"{val_hh}:{val_mm} {val_ampm}"),
         ("{date}", f"{val_DD}/{val_MM}/{val_YYYY}"),
         ("{time}", val_gio),
+        ("{gmt}", val_gmt),
         ("{city}", city),
         ("{weather}", weather_str),
         ("{weather_short}", val_w_short),
@@ -372,8 +376,11 @@ def render_format(template: str, base_name: str, weather, city: str, tz_str: str
     res = re.sub(r'\bss\b', val_ss, res)
     res = re.sub(r'\bampm\b', val_ampm, res)
 
-    # 3. Cuối cùng chèn base_name để không bị trùng với các ký tự ngày giờ
-    res = res.replace("{base_name}", base_name)
+    # 3. Chèn nội dung người dùng sau cùng, không diễn giải HH/{tag} trong tên/random.
+    if random_text is None:
+        random_text = random_names.choose() if "{random}" in res else ""
+    values = {"base_name": base_name, "random": random_text}
+    res = re.sub(r"\{(base_name|random)\}", lambda match: values[match.group(1)], res)
     return res.strip()
 
 def generate_preview(config: dict = None) -> tuple:
@@ -382,7 +389,7 @@ def generate_preview(config: dict = None) -> tuple:
     tz_str = cfg.get("TIMEZONE", "Asia/Ho_Chi_Minh")
     base_name = cfg.get("BASE_NAME", "tên")
     city = cfg.get("CITY", "Bac Ninh")
-    name_format = cfg.get("NAME_FORMAT", "{base_name} | HH:mm - DD/MM/YYYY")
+    name_format = cfg.get("NAME_FORMAT", DEFAULT_NAME_FORMAT)
     bio_format = cfg.get("BIO_FORMAT", "{weather} ⏰ HH:mm")
     weather = state.weather_data if state.weather_data else (state.current_weather or f"📍 {city}")
 
@@ -395,11 +402,12 @@ def generate_preview(config: dict = None) -> tuple:
         "scrobbles": state.music_scrobbles or "1234"
     }
 
-    p_name = render_format(name_format, base_name, weather, city, tz_str, music_info)
+    random_text = random_names.choose() if "{random}" in name_format or "{random}" in bio_format else ""
+    p_name = render_format(name_format, base_name, weather, city, tz_str, music_info, random_text)
     if len(p_name) > 64:
         p_name = p_name[:64]
 
-    p_bio = render_format(bio_format, base_name, weather, city, tz_str, music_info)
+    p_bio = render_format(bio_format, base_name, weather, city, tz_str, music_info, random_text)
     if len(p_bio) > 70:
         p_bio = p_bio[:70]
 
@@ -433,13 +441,14 @@ def generate_bio_preview(config: dict = None, template: str = None) -> dict:
 
     # Bio thực tế hiện tại
     cur_music = dummy_music if state.current_music else no_music
-    bio_current = render_format(bio_format, base_name, weather, city, tz_str, cur_music)
+    random_text = random_names.choose() if "{random}" in bio_format else ""
+    bio_current = render_format(bio_format, base_name, weather, city, tz_str, cur_music, random_text)
 
     # Bio khi có nhạc phát
-    bio_with_music = render_format(bio_format, base_name, weather, city, tz_str, dummy_music)
+    bio_with_music = render_format(bio_format, base_name, weather, city, tz_str, dummy_music, random_text)
 
     # Bio khi không có nhạc (dự phòng thời tiết)
-    bio_no_music = render_format(bio_format, base_name, weather, city, tz_str, no_music)
+    bio_no_music = render_format(bio_format, base_name, weather, city, tz_str, no_music, random_text)
 
     return {
         "template": bio_format,
@@ -466,12 +475,14 @@ class ProfileEngine:
             return True, "Tiến trình đang chạy sẵn."
 
         state.reload_config()
-        raw_api_id = state.config.get("API_ID", "2040")
+        raw_api_id = state.config.get("API_ID", "")
         try:
             api_id = int(raw_api_id)
         except ValueError:
             api_id = 0
-        api_hash = state.config.get("API_HASH", "b18441a1ff607e10a989891a5462e627")
+        api_hash = state.config.get("API_HASH", "")
+        if api_id <= 0 or not api_hash:
+            return False, "Thiếu API_ID/API_HASH riêng. Lấy tại my.telegram.org/apps rồi chạy python setup.py."
         session_string = state.config.get("SESSION_STRING", "")
         session_name = state.config.get("SESSION_NAME", "bot")
 
@@ -587,12 +598,12 @@ class ProfileEngine:
                     weather_dict = state.weather_data or await get_detailed_weather(city, state.config.get("WEATHER_API"), current_tz)
 
                 base_name = state.config.get("BASE_NAME", "tên")
-                name_format = state.config.get("NAME_FORMAT", "{base_name} | HH:mm - DD/MM/YYYY")
+                name_format = state.config.get("NAME_FORMAT", DEFAULT_NAME_FORMAT)
                 bio_format = state.config.get("BIO_FORMAT", "{weather} ⏰ HH:mm")
 
                 # Lấy bài hát từ Last.fm nếu có cài đặt username
                 lastfm_user = state.config.get("LASTFM_USERNAME", "").strip()
-                lastfm_key = state.config.get("LASTFM_API_KEY", "b25b959554ed76058ac220b7b2e0a026").strip()
+                lastfm_key = state.config.get("LASTFM_API_KEY", "").strip()
                 music_info = {}
                 if lastfm_user:
                     music_info = await get_lastfm_track(lastfm_user, lastfm_key)
@@ -602,11 +613,12 @@ class ProfileEngine:
                     state.music_artist = music_info.get("artist", "")
                     state.music_scrobbles = music_info.get("scrobbles", "")
 
-                new_name = render_format(name_format, base_name, weather_dict, city, current_tz, music_info)
+                random_text = random_names.choose() if "{random}" in name_format or "{random}" in bio_format else ""
+                new_name = render_format(name_format, base_name, weather_dict, city, current_tz, music_info, random_text)
                 if len(new_name) > 64:
                     new_name = new_name[:64]
 
-                new_bio = render_format(bio_format, base_name, weather_dict, city, current_tz, music_info)
+                new_bio = render_format(bio_format, base_name, weather_dict, city, current_tz, music_info, random_text)
                 if len(new_bio) > 70:
                     new_bio = new_bio[:70]
 

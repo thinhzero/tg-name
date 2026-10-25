@@ -6,7 +6,7 @@ name.py - Điểm khởi chạy chính của hệ thống Telegram Profile Updat
 """
 
 import asyncio
-import os
+from bot_updater import run_with_restart
 from updater_state import state
 from profile_engine import engine
 from helper_bot import run_standalone_bot
@@ -35,12 +35,15 @@ async def main():
         print("[ℹ️] Bạn có thể gõ các lệnh .status, .name, .update trong tin nhắn Telegram.")
         print("Nhấn Ctrl+C để dừng bot.\n")
 
-        # Chờ cho đến khi engine dừng
-        while engine.is_running:
-            await asyncio.sleep(1)
+        try:
+            # Chờ cho đến khi engine dừng hoặc có yêu cầu khởi động lại
+            while engine.is_running:
+                await asyncio.sleep(1)
+        finally:
+            await engine.stop()
 
 if __name__ == "__main__":
     try:
-        asyncio.run(main())
+        run_with_restart(main)
     except (KeyboardInterrupt, SystemExit):
         print("\n[👋] Đã dừng chương trình.")

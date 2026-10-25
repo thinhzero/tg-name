@@ -25,6 +25,109 @@ MONTHS = {
 }
 
 TEXTS: Dict[str, Dict[str, str]] = {
+    "random_add_usage": {
+        "vi": "🎲 Thêm bằng <code>.updaterandom eat29</code> (Helper Bot: <code>/updaterandom eat29</code>). Có thể gửi nhiều dòng, mỗi dòng một mục.",
+        "en": "🎲 Use <code>.updaterandom eat29</code> (Helper Bot: <code>/updaterandom eat29</code>). Multiple lines are supported, one entry per line."
+    },
+    "random_added": {
+        "vi": "✅ <b>Đã thêm {count} mục vào name.txt.</b> UID — Nội dung:",
+        "en": "✅ <b>Added {count} entries to name.txt.</b> UID — Text:"
+    },
+    "random_duplicate": {
+        "vi": "ℹ️ Các mục này đã có trong name.txt; không thêm trùng. Dùng <code>.lsrandom</code> hoặc <code>/lsrandom</code> để xem UID.",
+        "en": "ℹ️ These entries already exist in name.txt; duplicates were skipped. Use <code>.lsrandom</code> or <code>/lsrandom</code> to see their UIDs."
+    },
+    "random_list": {
+        "vi": "🎲 <b>Danh sách random ({count} mục)</b>\nUID — Nội dung:",
+        "en": "🎲 <b>Random entries ({count})</b>\nUID — Text:"
+    },
+    "random_empty": {
+        "vi": "📭 name.txt đang trống. Thêm bằng <code>.updaterandom &lt;nội dung&gt;</code> hoặc <code>/updaterandom &lt;nội dung&gt;</code>.",
+        "en": "📭 name.txt is empty. Add entries using <code>.updaterandom &lt;text&gt;</code> or <code>/updaterandom &lt;text&gt;</code>."
+    },
+    "random_remove_usage": {
+        "vi": "🗑 Dùng <code>.rmrandom &lt;uid&gt;</code> (Helper Bot: <code>/rmrandom &lt;uid&gt;</code>). Lấy UID bằng <code>.lsrandom</code> hoặc <code>/lsrandom</code>.",
+        "en": "🗑 Use <code>.rmrandom &lt;uid&gt;</code> (Helper Bot: <code>/rmrandom &lt;uid&gt;</code>). Get the UID with <code>.lsrandom</code> or <code>/lsrandom</code>."
+    },
+    "random_removed": {
+        "vi": "🗑 <b>Đã xóa mục random:</b>",
+        "en": "🗑 <b>Removed random entry:</b>"
+    },
+    "random_not_found": {
+        "vi": "⚠️ Không tìm thấy UID <code>{uid}</code>. Dùng <code>.lsrandom</code> hoặc <code>/lsrandom</code> để xem lại.",
+        "en": "⚠️ UID <code>{uid}</code> was not found. Use <code>.lsrandom</code> or <code>/lsrandom</code> to check the list."
+    },
+    "random_file_error": {
+        "vi": "❌ Không thể đọc/ghi name.txt: <code>{details}</code>",
+        "en": "❌ Could not read/write name.txt: <code>{details}</code>"
+    },
+
+    # Cập nhật mã nguồn bot từ GitHub
+    "self_update_checking": {
+        "vi": "🔎 <b>Đang kiểm tra bản bot mới trên GitHub...</b>",
+        "en": "🔎 <b>Checking GitHub for bot updates...</b>"
+    },
+    "self_update_downloading": {
+        "vi": "📥 <b>Có bản mới! Đang clone thinhzero/tg-name (main)...</b>",
+        "en": "📥 <b>Update found! Cloning thinhzero/tg-name (main)...</b>"
+    },
+    "self_update_validating": {
+        "vi": "🔎 <b>Đang kiểm tra mã nguồn mới...</b>",
+        "en": "🔎 <b>Validating the new source code...</b>"
+    },
+    "self_update_dependencies": {
+        "vi": "📦 <b>Đang cài thư viện từ requirements.txt mới...</b>",
+        "en": "📦 <b>Installing dependencies from the new requirements.txt...</b>"
+    },
+    "self_update_latest": {
+        "vi": "✅ <b>Bot đã ở bản mới nhất.</b> Commit: <code>{commit}</code>",
+        "en": "✅ <b>The bot is already up to date.</b> Commit: <code>{commit}</code>"
+    },
+    "self_update_restarting": {
+        "vi": "✅ <b>Đã cập nhật bot:</b> <code>{old}</code> → <code>{new}</code>\n🔄 Đang khởi động lại bot...",
+        "en": "✅ <b>Bot updated:</b> <code>{old}</code> → <code>{new}</code>\n🔄 Restarting the bot..."
+    },
+    "self_update_busy": {
+        "vi": "⏳ Bot đang cập nhật hoặc chuẩn bị khởi động lại. Vui lòng chờ.",
+        "en": "⏳ An update or restart is already in progress. Please wait."
+    },
+    "self_update_missing_git": {
+        "vi": "❌ Chưa cài Git. Hãy cài <code>git</code> trên máy chạy bot rồi thử lại.",
+        "en": "❌ Git is not installed. Install <code>git</code> on the bot host and try again."
+    },
+    "self_update_not_git": {
+        "vi": "❌ Thư mục bot không phải bản Git clone độc lập. Hãy dùng <code>git clone https://github.com/thinhzero/tg-name.git</code> vào thư mục mới, chuyển .env/phiên đăng nhập sang và chạy lại.",
+        "en": "❌ The bot directory is not a standalone Git checkout. Use <code>git clone https://github.com/thinhzero/tg-name.git</code> in a new directory, transfer your .env/session files and start it again."
+    },
+    "self_update_dirty": {
+        "vi": "⚠️ Mã nguồn có thay đổi cục bộ chưa commit. Đã hủy cập nhật để không ghi đè; hãy lưu và xử lý các thay đổi đó trước.",
+        "en": "⚠️ Source files have uncommitted local changes. Update cancelled to avoid overwriting them; save and resolve those changes first."
+    },
+    "self_update_diverged": {
+        "vi": "⚠️ Lịch sử Git cục bộ khác nhánh main trên GitHub. Không thể cập nhật fast-forward; hãy xử lý các commit riêng thủ công.",
+        "en": "⚠️ Local Git history differs from GitHub main. A fast-forward update is not possible; resolve local commits manually."
+    },
+    "self_update_unsafe_file": {
+        "vi": "❌ Bản mới chứa file cấu hình/dữ liệu cá nhân cần bảo vệ: <code>{filename}</code>. Đã hủy cập nhật.",
+        "en": "❌ The update contains a protected configuration/personal data file: <code>{filename}</code>. Update cancelled."
+    },
+    "self_update_invalid_source": {
+        "vi": "❌ Mã Python mới không hợp lệ. Chưa thay mã nguồn đang chạy.\n<code>{details}</code>",
+        "en": "❌ The new Python source is invalid. Running source files were not changed.\n<code>{details}</code>"
+    },
+    "self_update_changed": {
+        "vi": "⚠️ HEAD cục bộ đã thay đổi trong lúc tải bản mới. Đã hủy cập nhật; hãy thử lại.",
+        "en": "⚠️ Local HEAD changed while downloading the update. Update cancelled; please try again."
+    },
+    "self_update_timeout": {
+        "vi": "❌ Tải/cài đặt quá thời gian chờ. Chưa áp dụng mã nguồn mới; hãy kiểm tra mạng và thử lại.",
+        "en": "❌ Download/installation timed out. New source was not applied; check the network and try again."
+    },
+    "self_update_command_failed": {
+        "vi": "❌ Cập nhật không thành công; không khởi động lại bot.\n<code>{details}</code>",
+        "en": "❌ Update failed; the bot will not restart.\n<code>{details}</code>"
+    },
+
     # Nút bấm Menu chính
     "btn_update_now": {
         "vi": "🔄 Cập nhật ngay",

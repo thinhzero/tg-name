@@ -1,15 +1,30 @@
 # Environment variables & sensitive credentials
 .env
+.env.*
+!.env.example
+
+# Danh sách random cá nhân (tạo từ name.example.txt ở lần dùng đầu tiên)
+name.txt
+.name-*.tmp
 
 # Telethon session files
 *.session
 *.session-journal
+*.session-wal
+*.session-shm
 
 # Python bytecode & caches
 __pycache__/
 *.py[cod]
 *$py.class
 *.so
+.venv/
+venv/
+env/
+.pytest_cache/
+.ruff_cache/
+.coverage
+htmlcov/
 
 # Logs
 *.log

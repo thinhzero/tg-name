@@ -16,12 +16,12 @@ Chức năng:
 4. Lệnh Userbot (.status, .update, .name, .city, .pause, .resume, .help).
 """
 
-import os
 import re
 import json
 import asyncio
 import urllib.request
 import urllib.parse
+from html import escape
 from telethon import TelegramClient, events, Button
 from telethon.sessions import StringSession
 from telethon.errors import (
@@ -31,9 +31,11 @@ from telethon.errors import (
     MessageNotModifiedError
 )
 
-from updater_state import state
+from updater_state import state, DEFAULT_NAME_FORMAT
 from profile_engine import engine, generate_preview, get_lastfm_track
-from i18n import get_text, get_weekday, get_month_name, LANGUAGES
+from i18n import get_text
+from bot_updater import bot_updater, run_with_restart, UpdateError
+from random_names import random_names
 
 # Lưu trạng thái đàm thoại của user: user_id -> {"action": ..., "data": ...}
 user_sessions = {}
@@ -41,11 +43,14 @@ user_sessions = {}
 def is_admin(user_id: int) -> bool:
     """Kiểm tra quyền truy cập của Admin"""
     admin_id = state.config.get("ADMIN_ID", "").strip()
-    if not admin_id:
-        # Nếu chưa cài ADMIN_ID, tự động cấp quyền cho người đầu tiên nhắn tin
-        state.update_config({"ADMIN_ID": str(user_id)})
-        return True
-    return str(user_id) == admin_id
+    return bool(admin_id) and str(user_id) == admin_id
+
+
+def secret_status(value, lang="vi"):
+    """Chỉ báo đã cài/chưa cài, không gửi lại key vào lịch sử chat."""
+    if lang == "en":
+        return "Configured (hidden)" if value else "Not configured"
+    return "Đã cấu hình (ẩn)" if value else "Chưa cấu hình"
 
 def test_weather_api_sync(api_key: str, city: str):
     """Kiểm tra API Key OpenWeatherMap đồng bộ"""
@@ -53,7 +58,7 @@ def test_weather_api_sync(api_key: str, city: str):
         return True, "Không dùng OpenWeatherMap API (chỉ hiện tên thành phố)."
     try:
         city_encoded = urllib.parse.quote(city)
-        url = f"http://api.openweathermap.org/data/2.5/weather?q={city_encoded}&appid={api_key}&units=metric&lang=vi"
+        url = f"https://api.openweathermap.org/data/2.5/weather?q={city_encoded}&appid={api_key}&units=metric&lang=vi"
         req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
         with urllib.request.urlopen(req, timeout=6) as resp:
             if resp.status == 200:
@@ -71,12 +76,14 @@ def test_weather_api_sync(api_key: str, city: str):
     except Exception as e:
         return False, f"Lỗi kết nối: {e}"
 
-def test_lastfm_user_sync(username: str, api_key: str = "b25b959554ed76058ac220b7b2e0a026") -> tuple:
+def test_lastfm_user_sync(username: str, api_key: str = "") -> tuple:
     """Kiểm tra kết nối và tính hợp lệ của tài khoản Last.fm"""
     if not username:
         return True, "Chưa cấu hình Last.fm."
+    if not api_key:
+        return False, "Chưa có LASTFM_API_KEY riêng. Điền key vào .env hoặc chạy python setup.py."
     try:
-        key = api_key or "b25b959554ed76058ac220b7b2e0a026"
+        key = api_key
         url = f"https://ws.audioscrobbler.com/2.0/?method=user.getrecenttracks&user={urllib.parse.quote(username)}&api_key={key}&format=json&limit=1"
         req = urllib.request.Request(url, headers={"User-Agent": "TelegramProfileUpdater/1.0"})
         with urllib.request.urlopen(req, timeout=6) as resp:
@@ -163,6 +170,7 @@ def get_format_keyboard(lang: str = None):
     """Bàn phím cài đặt định dạng với các mẫu có sẵn và tùy biến"""
     lang = lang or state.config.get("LANGUAGE", "vi")
     return [
+        [Button.inline("🎲 {base_name} | HH:mm - DD/MM | GMT | Random", data="preset_10")],
         [Button.inline("🌟 Mẫu 1: {base_name} | HH:mm - DD/MM/YYYY", data="preset_1")],
         [Button.inline("📅 Mẫu 2: {base_name} | {thu}, DD/MM/YYYY - HH:mm", data="preset_2")],
         [Button.inline("🎵 Mẫu 3: {base_name} | {music_or_weather}", data="preset_6")],
@@ -229,7 +237,7 @@ def format_settings_text(lang: str = None):
             f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
             f"• <b>Telegram Account:</b> {has_sess}\n"
             f"• <b>API_ID:</b> <code>{state.config.get('API_ID')}</code>\n"
-            f"• <b>API_HASH:</b> <code>{state.config.get('API_HASH')[:8]}...</code>\n"
+            f"• <b>API_HASH:</b> {secret_status(state.config.get('API_HASH'), lang)}\n"
             f"• <b>Fixed Name (BASE_NAME):</b> <code>{state.config.get('BASE_NAME')}</code>\n"
             f"• <b>Last.fm Username:</b> <code>{lastfm_user}</code>\n"
             f"• <b>City:</b> <code>{state.config.get('CITY')}</code>\n"
@@ -249,7 +257,7 @@ def format_settings_text(lang: str = None):
             f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
             f"• <b>Tài khoản Telegram:</b> {has_sess}\n"
             f"• <b>API_ID:</b> <code>{state.config.get('API_ID')}</code>\n"
-            f"• <b>API_HASH:</b> <code>{state.config.get('API_HASH')[:8]}...</code>\n"
+            f"• <b>API_HASH:</b> {secret_status(state.config.get('API_HASH'), lang)}\n"
             f"• <b>Tên hiển thị cố định:</b> <code>{state.config.get('BASE_NAME')}</code>\n"
             f"• <b>Tài khoản Last.fm:</b> <code>{lastfm_user}</code>\n"
             f"• <b>Tỉnh / Thành phố:</b> <code>{state.config.get('CITY')}</code>\n"
@@ -346,58 +354,149 @@ def format_bio_preview_card(lang: str = None):
 # BỘ XỬ LÝ LỆNH USERBOT (SELF-COMMANDS)
 # ============================================================
 
+async def handle_updatecheck(message):
+    """Dùng chung cho .updatecheck của chủ tài khoản và /updatecheck của admin."""
+    lang = state.config.get("LANGUAGE", "vi")
+
+    async def progress(key):
+        await message.edit(get_text(key, lang), parse_mode="html")
+
+    try:
+        result = await bot_updater.update(progress)
+    except UpdateError as exc:
+        details = {key: escape(str(value)) for key, value in exc.details.items()}
+        await message.edit(get_text(exc.key, lang, **details), parse_mode="html")
+        return
+    except Exception as exc:
+        await message.edit(get_text("self_update_command_failed", lang, details=escape(str(exc)[:1800])), parse_mode="html")
+        return
+
+    if not result.updated:
+        await message.edit(get_text("self_update_latest", lang, commit=result.current[:7]), parse_mode="html")
+        return
+
+    try:
+        await message.edit(get_text("self_update_restarting", lang, old=result.current[:7], new=result.latest[:7]), parse_mode="html")
+    finally:
+        bot_updater.request_restart()
+
+
+def format_random_entries(title, entries):
+    """Chia danh sách thành nhiều tin nhắn, không vượt giới hạn Telegram."""
+    pages = []
+    page = title
+    for entry in entries:
+        display = entry.text[:160] + ("…" if len(entry.text) > 160 else "")
+        line = f"\n• <code>{entry.uid}</code> — <code>{escape(display)}</code>"
+        if len((page + line).encode("utf-16-le")) // 2 > 3500:
+            pages.append(page)
+            page = title
+        page += line
+    pages.append(page)
+    return pages
+
+
+async def handle_random_command(event, cmd, arg, lang, helper=False):
+    try:
+        if cmd == "updaterandom":
+            if not arg:
+                pages = [get_text("random_add_usage", lang)]
+            else:
+                added = random_names.add(arg)
+                if added:
+                    state.trigger_update()
+                    pages = format_random_entries(get_text("random_added", lang, count=len(added)), added)
+                else:
+                    pages = [get_text("random_duplicate", lang)]
+        elif cmd == "lsrandom":
+            entries = random_names.entries()
+            pages = format_random_entries(get_text("random_list", lang, count=len(entries)), entries) if entries else [get_text("random_empty", lang)]
+        else:
+            uid = arg.strip().strip("{}").strip()
+            if not uid:
+                pages = [get_text("random_remove_usage", lang)]
+            else:
+                removed = random_names.remove(uid)
+                if removed is not None:
+                    state.trigger_update()
+                    pages = format_random_entries(get_text("random_removed", lang), [removed])
+                else:
+                    pages = [get_text("random_not_found", lang, uid=escape(uid[:80]))]
+    except (OSError, UnicodeError) as exc:
+        pages = [get_text("random_file_error", lang, details=escape(str(exc)[:500]))]
+
+    for index, page in enumerate(pages):
+        if helper or index:
+            await event.reply(page, parse_mode="html")
+        else:
+            await event.edit(page, parse_mode="html")
+
+
+def format_help(lang="vi", helper=False):
+    p = "/" if helper else "."
+    name_cmd = "setname" if helper else "name"
+    city_cmd = "setcity" if helper else "city"
+    example = (
+        f"<code>{p}{name_cmd} HzzMonet</code>\n"
+        f"<code>{p}nameformat {DEFAULT_NAME_FORMAT}</code>\n"
+        f"<code>{p}updaterandom sleep</code>\n"
+        f"<code>{p}preview</code>"
+    )
+    if lang == "en":
+        where = "Send one command per message in this private bot chat." if helper else "Send one command per message from your own account in Saved Messages."
+        return (
+            f"📖 <b>QUICK START</b>\n{where}\n\n"
+            f"<b>1. Name + time + GMT + random</b>\n{example}\n"
+            "Replace HzzMonet with your name; keep the {placeholders} unchanged.\n\n"
+            f"<b>2. Random entries in name.txt</b>\n"
+            f"• <code>{p}updaterandom text</code>: add; multiple lines supported.\n"
+            f"• <code>{p}lsrandom</code>: show entries and UIDs.\n"
+            f"• <code>{p}rmrandom UID</code>: use the code from the list, not a Telegram user ID.\n\n"
+            f"<b>3. Controls</b>\n"
+            f"• <code>{p}update</code>: update name/bio now.\n"
+            f"• <code>{p}updatecheck</code>: update CODE from GitHub and restart.\n"
+            f"• <code>{p}status</code>, <code>{p}pause</code>, <code>{p}resume</code>\n"
+            f"• <code>{p}bioformat {{weather_short}} ⏰ HH:mm</code>: change bio.\n"
+            f"• <code>{p}previewbio</code>: check the 70-character bio limit.\n"
+            f"• <code>{p}{city_cmd} Hanoi</code>, <code>{p}weather</code>\n"
+            f"• <code>{p}lastfm username</code>, <code>{p}music</code>: needs your own LASTFM_API_KEY in .env.\n"
+            f"• <code>{p}lang vi</code> / <code>{p}lang en</code>\n\n"
+            "Setup and troubleshooting: https://github.com/thinhzero/tg-name#readme\n"
+            "Never share .env, sessions, OTP or 2FA passwords."
+        )
+    where = "Gửi từng lệnh riêng trong chat riêng với bot này." if helper else "Tự gửi từng lệnh riêng trong Saved Messages bằng tài khoản đã đăng nhập."
+    return (
+        f"📖 <b>HƯỚNG DẪN NHANH</b>\n{where}\n\n"
+        f"<b>1. Tên + giờ + GMT + random</b>\n{example}\n"
+        "Thay HzzMonet bằng tên của bạn; giữ nguyên các {từ_khóa} trong mẫu.\n\n"
+        f"<b>2. Random trong name.txt</b>\n"
+        f"• <code>{p}updaterandom nội dung</code>: thêm; có thể gửi nhiều dòng.\n"
+        f"• <code>{p}lsrandom</code>: xem nội dung và UID.\n"
+        f"• <code>{p}rmrandom UID</code>: lấy mã mục trong danh sách, không phải ID tài khoản.\n\n"
+        f"<b>3. Điều khiển</b>\n"
+        f"• <code>{p}update</code>: đổi tên/bio ngay.\n"
+        f"• <code>{p}updatecheck</code>: cập nhật CODE từ GitHub rồi restart.\n"
+        f"• <code>{p}status</code>, <code>{p}pause</code>, <code>{p}resume</code>\n"
+        f"• <code>{p}bioformat {{weather_short}} ⏰ HH:mm</code>: đổi mẫu bio.\n"
+        f"• <code>{p}previewbio</code>: kiểm tra giới hạn 70 ký tự bio.\n"
+        f"• <code>{p}{city_cmd} Hanoi</code>, <code>{p}weather</code>\n"
+        f"• <code>{p}lastfm username</code>, <code>{p}music</code>: cần LASTFM_API_KEY riêng trong .env.\n"
+        f"• <code>{p}lang vi</code> / <code>{p}lang en</code>\n\n"
+        "Cài đặt và sửa lỗi: https://github.com/thinhzero/tg-name#readme\n"
+        "Không chia sẻ .env, session, OTP hoặc mật khẩu 2FA."
+    )
+
+
 def register_userbot_handlers(client: TelegramClient):
     """Đăng ký các lệnh tự điều khiển trên Userbot (.status, .name, .update, ...)"""
-    @client.on(events.NewMessage(outgoing=True, pattern=r"^\.(help|status|update|name|setname|basename|city|pause|resume|nameformat|setnameformat|bioformat|setbio|lastfm|music|bio|previewbio|preview|weather|lang)(?:\s+([\s\S]+))?$"))
+    @client.on(events.NewMessage(outgoing=True, pattern=r"^\.(help|status|update|updatecheck|updaterandom|lsrandom|rmrandom|name|setname|basename|city|pause|resume|nameformat|setnameformat|bioformat|setbio|lastfm|music|bio|previewbio|preview|weather|lang)(?:\s+([\s\S]+))?$"))
     async def userbot_command_handler(event):
         cmd = event.pattern_match.group(1).lower()
         arg = (event.pattern_match.group(2) or "").strip()
         cur_lang = state.config.get("LANGUAGE", "vi")
 
         if cmd == "help":
-            if cur_lang == "en":
-                help_text = (
-                    "🛠 <b>USERBOT PROFILE CONTROLLER COMMANDS</b>\n"
-                    "━━━━━━━━━━━━━━━━━━━━━\n"
-                    "• <code>.name &lt;new name&gt;</code> : Change BASE_NAME (e.g. <code>.name HzzMonet</code>)\n"
-                    "• <code>.nameformat &lt;fmt&gt;</code> : Change name format (e.g. <code>.nameformat {base_name} | HH:mm - DD/MM/YYYY</code>)\n"
-                    "• <code>.bio &lt;fmt&gt;</code> / <code>.bioformat &lt;fmt&gt;</code> : Change bio format (e.g. <code>.bio {weather} ⏰ HH:mm</code>)\n"
-                    "• <code>.bio</code> / <code>.previewbio</code> : Bio preview & 70-character limit check\n"
-                    "• <code>.weather</code> : View detailed weather info\n"
-                    "• <code>.preview</code> : Preview Name & Bio\n"
-                    "• <code>.lang &lt;vi|en&gt;</code> : Switch language (Tiếng Việt / English)\n"
-                    "• <code>.lastfm &lt;username&gt;</code> : Connect Last.fm music account\n"
-                    "• <code>.music</code> : View currently playing track\n"
-                    "• <code>.city &lt;city&gt;</code> : Change weather city\n"
-                    "• <code>.update</code> : Force profile update now\n"
-                    "• <code>.status</code> : View updater status\n"
-                    "• <code>.pause</code> / <code>.resume</code> : Pause / Resume\n"
-                    "• <code>.help</code> : Show this help message\n\n"
-                    "<b>Weather placeholders:</b> <code>{weather}</code>, <code>{weather_short}</code>, <code>{temp}</code>, <code>{feels_like}</code>, <code>{humidity}</code>, <code>{wind}</code>, <code>{weather_desc}</code>\n"
-                    "<b>Music placeholders:</b> <code>{music}</code>, <code>{music_or_weather}</code>, <code>{track}</code>, <code>{artist}</code>"
-                )
-            else:
-                help_text = (
-                    "🛠 <b>LỆNH ĐIỀU KHIỂN PROFILE USERBOT</b>\n"
-                    "━━━━━━━━━━━━━━━━━━━━━\n"
-                    "• <code>.name &lt;tên mới&gt;</code> : Đổi BASE_NAME (Ví dụ: <code>.name HzzMonet</code>)\n"
-                    "• <code>.nameformat &lt;mẫu&gt;</code> : Đổi định dạng tên (Ví dụ: <code>.nameformat {base_name} | HH:mm - DD/MM/YYYY</code>)\n"
-                    "• <code>.bio &lt;mẫu&gt;</code> / <code>.bioformat &lt;mẫu&gt;</code> : Đổi định dạng bio (Ví dụ: <code>.bio {weather} ⏰ HH:mm</code>)\n"
-                    "• <code>.bio</code> / <code>.previewbio</code> : Xem trước Bio & kiểm tra độ dài 70 ký tự\n"
-                    "• <code>.weather</code> : Xem chi tiết thời tiết (nhiệt độ, độ ẩm, gió, bình minh/hoàng hôn)\n"
-                    "• <code>.preview</code> : Xem trước Tên và Bio hiện tại\n"
-                    "• <code>.lang &lt;vi|en&gt;</code> : Đổi ngôn ngữ (Tiếng Việt / English)\n"
-                    "• <code>.lastfm &lt;username&gt;</code> : Kết nối tài khoản Last.fm nghe nhạc\n"
-                    "• <code>.music</code> : Xem bài hát đang nghe trên Last.fm\n"
-                    "• <code>.city &lt;thành phố&gt;</code> : Đổi thành phố thời tiết\n"
-                    "• <code>.update</code> : Kích hoạt cập nhật profile ngay lập tức\n"
-                    "• <code>.status</code> : Xem trạng thái cập nhật\n"
-                    "• <code>.pause</code> / <code>.resume</code> : Tạm dừng hoặc tiếp tục\n"
-                    "• <code>.help</code> : Hiển thị bảng trợ giúp này\n\n"
-                    "<b>Từ khóa thời tiết:</b> <code>{weather}</code>, <code>{weather_short}</code>, <code>{temp}</code>, <code>{feels_like}</code>, <code>{humidity}</code>, <code>{wind}</code>, <code>{weather_desc}</code>\n"
-                    "<b>Từ khóa âm nhạc:</b> <code>{music}</code>, <code>{music_or_weather}</code>, <code>{track}</code>, <code>{artist}</code>"
-                )
-            await event.edit(help_text, parse_mode="html")
+            await event.edit(format_help(cur_lang), parse_mode="html")
 
         elif cmd == "lang":
             arg_l = arg.lower()
@@ -419,6 +518,13 @@ def register_userbot_handlers(client: TelegramClient):
         elif cmd == "update":
             state.trigger_update()
             await event.edit("🔄 <i>Đã gửi yêu cầu cập nhật profile ngay lập tức...</i>", parse_mode="html")
+
+        elif cmd == "updatecheck":
+            await event.edit(get_text("self_update_checking", cur_lang), parse_mode="html")
+            await handle_updatecheck(event)
+
+        elif cmd in ("updaterandom", "lsrandom", "rmrandom"):
+            await handle_random_command(event, cmd, arg, cur_lang)
 
         elif cmd in ("previewbio", "bio", "setbio", "bioformat"):
             if arg:
@@ -517,6 +623,12 @@ def register_userbot_handlers(client: TelegramClient):
 def register_bot_handlers(bot_client: TelegramClient):
     """Đăng ký toàn bộ xử lý tin nhắn và nút bấm cho Helper Bot"""
 
+    @bot_client.on(events.NewMessage)
+    @bot_client.on(events.CallbackQuery)
+    async def private_chat_only(event):
+        if not event.is_private:
+            raise events.StopPropagation
+
     @bot_client.on(events.NewMessage(pattern=r"^/cancel$"))
     async def cancel_cmd(event):
         if not is_admin(event.sender_id): return
@@ -557,143 +669,7 @@ def register_bot_handlers(bot_client: TelegramClient):
     async def help_cmd(event):
         if not is_admin(event.sender_id): return
         lang = state.config.get("LANGUAGE", "vi")
-        if lang == "en":
-            msg = (
-                "📖 <b>NAME & BIO CONFIGURATION GUIDE (FORMAT GUIDE)</b>\n"
-                "━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
-                "<b>1. Change Fixed Name (BASE_NAME):</b>\n"
-                "• Command: <code>/setname HzzMonet</code> (or <code>/basename HzzMonet</code>)\n"
-                "• Or click: <b>[⚙️ Settings]</b> ➡️ <b>[✏️ Change Name]</b>\n\n"
-                "<b>2. Customize Display Name (NAME_FORMAT):</b>\n"
-                "• Command: <code>/nameformat {base_name} | HH:mm - DD/MM/YYYY</code>\n"
-                "• Or type directly: <code>/nameformat HzzMonet | HH:mm - DD/MM/YYYY</code>\n"
-                "• Or click: <b>[⚙️ Settings]</b> ➡️ <b>[🎨 Display Formats]</b>\n\n"
-                "<b>3. Supported Time Placeholders:</b>\n"
-                "• <code>HH</code> : 24h format (00 - 23)\n"
-                "• <code>mm</code> : Minutes (00 - 59)\n"
-                "• <code>ss</code> : Seconds (00 - 59)\n"
-                "• <code>hh</code> : 12h format (01 - 12) & <code>ampm</code> : AM/PM\n"
-                "• <code>DD</code> : Day of month (01 - 31)\n"
-                "• <code>MM</code> : Month (01 - 12)\n"
-                "• <code>YYYY</code> : 4-digit year (2026)\n"
-                "• <code>YY</code> : 2-digit year (26)\n"
-                "• <code>{day}</code> / <code>{day_name}</code> : Day of week (Monday, Tuesday...)\n"
-                "• <code>{day_short}</code> : Short day (Mon, Tue... Sun)\n"
-                "• <code>{thu}</code> : Vietnamese day (Thứ Hai, Thứ Ba...)\n"
-                "• <code>{city}</code> : City name\n"
-                "• <code>{base_name}</code> : Your fixed name\n\n"
-                "<b>4. Weather Placeholders (OpenWeatherMap & wttr.in):</b>\n"
-                "• <code>{weather}</code> : Auto-balanced for Bio length limit\n"
-                "• <code>{weather_short}</code> : Ultra-compact (e.g. ⛅ 28°C)\n"
-                "• <code>{weather_medium}</code> : Medium (e.g. ⛅ Hanoi 28°C | 75%)\n"
-                "• <code>{weather_full}</code> : Detailed (e.g. 📍 Hanoi: ⛅ 28°C | 75% | 3m/s)\n"
-                "• <code>{temp}</code> : Current temperature (°C)\n"
-                "• <code>{feels_like}</code> : Feels like temperature (°C)\n"
-                "• <code>{humidity}</code> : Air humidity (%)\n"
-                "• <code>{wind}</code> : Wind speed\n"
-                "• <code>{weather_desc}</code> : Condition description\n"
-                "• <code>{weather_icon}</code> : Weather icon\n"
-                "• <code>{sunrise}</code> / <code>{sunset}</code> : Sunrise / sunset time\n\n"
-                "<b>5. Music Placeholders (Last.fm / Spotify / Apple Music):</b>\n"
-                "• <code>{music}</code> : Now playing track (with 🎧 when active or 🎵 when paused)\n"
-                "• <code>{music_or_weather}</code> : Shows music when playing; auto-switches to weather when idle\n"
-                "• <code>{track}</code> : Song title\n"
-                "• <code>{artist}</code> : Artist name\n"
-                "• <code>{scrobbles}</code> : Total scrobbles on Last.fm\n\n"
-                "<b>6. Popular Templates:</b>\n"
-                "• <code>HzzMonet | HH:mm - DD/MM/YYYY</code>\n"
-                "• <code>{base_name} | {music_or_weather}</code>\n"
-                "• <code>{music_or_weather} ⏰ HH:mm</code>\n"
-                "• <code>📍 {city} • {weather_short} ⏰ HH:mm</code>\n"
-                "• <code>{base_name} | {day}, DD/MM/YYYY - HH:mm</code>\n\n"
-                "<b>7. All Available Commands:</b>\n"
-                "• <code>/start</code> : Open Main Dashboard\n"
-                "• <code>/lang &lt;en|vi&gt;</code> : Switch language (English / Tiếng Việt)\n"
-                "• <code>/status</code> : View detailed status\n"
-                "• <code>/update</code> : Update profile immediately\n"
-                "• <code>/preview</code> : Preview Name and Bio\n"
-                "• <code>/previewbio</code> (or <code>/bio</code>) : Bio preview & 70 chars limit check\n"
-                "• <code>/weather</code> : Detailed weather information\n"
-                "• <code>/lastfm &lt;user&gt;</code> : Connect Last.fm account\n"
-                "• <code>/music</code> : View currently playing track\n"
-                "• <code>/setname &lt;name&gt;</code> : Change fixed name (BASE_NAME)\n"
-                "• <code>/nameformat &lt;fmt&gt;</code> : Change name format\n"
-                "• <code>/bioformat &lt;fmt&gt;</code> : Change bio format\n"
-                "• <code>/setcity &lt;city&gt;</code> : Change weather city\n"
-                "• <code>/pause</code> / <code>/resume</code> : Pause / Resume\n"
-                "• <code>/cancel</code> : Cancel active input action"
-            )
-        else:
-            msg = (
-                "📖 <b>HƯỚNG DẪN CẤU HÌNH TÊN & ĐỊNH DẠNG (FORMAT GUIDE)</b>\n"
-                "━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
-                "<b>1. Đổi tên cố định (BASE_NAME):</b>\n"
-                "• Gõ lệnh: <code>/setname HzzMonet</code> (hoặc <code>/basename HzzMonet</code>)\n"
-                "• Hoặc bấm: <b>[⚙️ Cài đặt]</b> ➡️ <b>[✏️ Đổi Tên]</b>\n\n"
-                "<b>2. Tùy biến cách hiển thị tên (NAME_FORMAT):</b>\n"
-                "• Gõ lệnh: <code>/nameformat {base_name} | HH:mm - DD/MM/YYYY</code>\n"
-                "• Hoặc viết thẳng tên: <code>/nameformat HzzMonet | HH:mm - DD/MM/YYYY</code>\n"
-                "• Hoặc bấm: <b>[⚙️ Cài đặt]</b> ➡️ <b>[🎨 Mẫu hiển thị]</b> (có sẵn mẫu bấm chọn)\n\n"
-                "<b>3. Các từ khóa thời gian hỗ trợ:</b>\n"
-                "• <code>HH</code> : Giờ 24h (00 - 23)\n"
-                "• <code>mm</code> : Phút (00 - 59)\n"
-                "• <code>ss</code> : Giây (00 - 59)\n"
-                "• <code>hh</code> : Giờ 12h (01 - 12) & <code>ampm</code> : AM/PM\n"
-                "• <code>DD</code> : Ngày trong tháng (01 - 31)\n"
-                "• <code>MM</code> : Tháng (01 - 12)\n"
-                "• <code>YYYY</code> : Năm 4 chữ số (2026)\n"
-                "• <code>YY</code> : Năm 2 chữ số (26)\n"
-                "• <code>{thu}</code> : Thứ tiếng Việt (Thứ Hai, Thứ Ba...)\n"
-                "• <code>{thu_ngan}</code> : Thứ viết tắt (T2, T3... CN)\n"
-                "• <code>{day}</code> : Thứ tiếng Anh (Monday, Tuesday...)\n"
-                "• <code>{city}</code> : Tên thành phố\n"
-                "• <code>{base_name}</code> : Tên cố định bạn đã lưu\n\n"
-                "<b>4. Từ khóa thời tiết nâng cao (OpenWeatherMap & wttr.in):</b>\n"
-                "• <code>{weather}</code> : Thời tiết tự động cân đối cho Bio\n"
-                "• <code>{weather_short}</code> : Cực ngắn gọn (VD: ⛅ 28°C)\n"
-                "• <code>{weather_medium}</code> : Vừa đủ (VD: ⛅ Hanoi 28°C | 75%)\n"
-                "• <code>{weather_full}</code> : Đầy đủ (VD: 📍 Hanoi: ⛅ 28°C | 75% | 3m/s)\n"
-                "• <code>{temp}</code> / <code>{nhiet_do}</code> : Nhiệt độ (°C)\n"
-                "• <code>{feels_like}</code> / <code>{cam_giac}</code> : Cảm giác thực tế (°C)\n"
-                "• <code>{humidity}</code> / <code>{do_am}</code> : Độ ẩm (%)\n"
-                "• <code>{wind}</code> / <code>{gio_toc}</code> : Tốc độ gió\n"
-                "• <code>{weather_desc}</code> : Mô tả thời tiết\n"
-                "• <code>{weather_icon}</code> : Icon thời tiết\n"
-                "• <code>{sunrise}</code> / <code>{sunset}</code> : Giờ bình minh / hoàng hôn\n\n"
-                "<b>5. Từ khóa âm nhạc (Last.fm / Spotify / Apple Music):</b>\n"
-                "• <code>{music}</code> : Bài hát đang nghe (kèm icon 🎧 khi phát hoặc 🎵 khi dừng)\n"
-                "• <code>{music_or_weather}</code> : Tự động hiện nhạc khi đang nghe; tự chuyển về thời tiết khi không nghe nhạc\n"
-                "• <code>{track}</code> : Tên bài hát\n"
-                "• <code>{artist}</code> : Tên nghệ sĩ/ca sĩ\n"
-                "• <code>{scrobbles}</code> : Tổng số lượt nghe trên Last.fm\n\n"
-                "<b>6. Các mẫu ví dụ phổ biến:</b>\n"
-                "• <code>HzzMonet | HH:mm - DD/MM/YYYY</code>\n"
-                "  👉 Ra tên: <b>HzzMonet | 21:08 - 12/09/2026</b>\n"
-                "• <code>{base_name} | {music_or_weather}</code>\n"
-                "  👉 Ra tên: <b>HzzMonet | 🎧 Blinding Lights - The Weeknd</b>\n"
-                "• <code>{music_or_weather} ⏰ HH:mm</code>\n"
-                "  👉 Bio: <b>🎧 Blinding Lights - The Weeknd ⏰ 21:08</b>\n"
-                "• <code>📍 {city} • {weather_short} ⏰ HH:mm</code>\n"
-                "  👉 Bio: <b>📍 Bac Ninh • ⛅ 28°C ⏰ 21:08</b>\n"
-                "• <code>{base_name} | {thu}, DD/MM/YYYY - HH:mm</code>\n"
-                "  👉 Ra tên: <b>HzzMonet | Thứ Bảy, 12/09/2026 - 21:08</b>\n\n"
-                "<b>7. Danh sách tất cả các lệnh:</b>\n"
-                "• <code>/start</code> : Mở Bảng điều khiển chính\n"
-                "• <code>/lang &lt;vi|en&gt;</code> : Đổi ngôn ngữ (Tiếng Việt / English)\n"
-                "• <code>/status</code> : Xem trạng thái chi tiết\n"
-                "• <code>/update</code> : Cập nhật profile ngay lập tức\n"
-                "• <code>/preview</code> : Xem trước Tên và Bio hiện tại\n"
-                "• <code>/previewbio</code> (hoặc <code>/bio</code>) : Xem trước Bio & kiểm tra độ dài 70 ký tự\n"
-                "• <code>/weather</code> : Xem chi tiết thời tiết (nhiệt độ, gió, độ ẩm, bình minh/hoàng hôn)\n"
-                "• <code>/lastfm &lt;user&gt;</code> : Kết nối tài khoản Last.fm\n"
-                "• <code>/music</code> : Xem bài hát đang nghe trên Last.fm\n"
-                "• <code>/setname &lt;tên&gt;</code> : Đổi tên cố định\n"
-                "• <code>/nameformat &lt;mẫu&gt;</code> : Đổi định dạng tên\n"
-                "• <code>/bioformat &lt;mẫu&gt;</code> : Đổi định dạng bio\n"
-                "• <code>/setcity &lt;thành phố&gt;</code> : Đổi thành phố thời tiết\n"
-                "• <code>/pause</code> / <code>/resume</code> : Tạm dừng / Tiếp tục\n"
-                "• <code>/cancel</code> : Hủy thao tác nhập liệu"
-            )
+        msg = format_help(lang, helper=True)
         await event.reply(msg, parse_mode="html", buttons=get_main_keyboard(lang))
 
     @bot_client.on(events.NewMessage(pattern=r"^/login$"))
@@ -718,6 +694,21 @@ def register_bot_handlers(bot_client: TelegramClient):
         if not is_admin(event.sender_id): return
         state.trigger_update()
         await event.reply("🔄 <b>Đã gửi lệnh cập nhật profile!</b>", parse_mode="html", buttons=get_main_keyboard())
+
+    @bot_client.on(events.NewMessage(pattern=r"^/updatecheck(?:@\w+)?\s*$"))
+    async def updatecheck_cmd(event):
+        if not is_admin(event.sender_id): return
+        lang = state.config.get("LANGUAGE", "vi")
+        message = await event.reply(get_text("self_update_checking", lang), parse_mode="html")
+        await handle_updatecheck(message)
+
+    @bot_client.on(events.NewMessage(pattern=r"^/(updaterandom|lsrandom|rmrandom)(?:@\w+)?(?:\s+([\s\S]+))?$"))
+    async def random_cmd(event):
+        if not is_admin(event.sender_id): return
+        cmd = event.pattern_match.group(1)
+        arg = (event.pattern_match.group(2) or "").strip()
+        lang = state.config.get("LANGUAGE", "vi")
+        await handle_random_command(event, cmd, arg, lang, helper=True)
 
     @bot_client.on(events.NewMessage(pattern=r"^/preview$"))
     async def preview_cmd(event):
@@ -965,6 +956,7 @@ def register_bot_handlers(bot_client: TelegramClient):
     async def user_input_handler(event):
         if not is_admin(event.sender_id): return
         if event.raw_text.strip() == "/cancel": return
+        if re.match(r"^/(?:updaterandom|lsrandom|rmrandom|help|updatecheck)(?:@\w+)?(?:\s|$)", event.raw_text.strip()): return
 
         sess = user_sessions.get(event.sender_id)
         if not sess: return
@@ -1073,7 +1065,7 @@ def register_bot_handlers(bot_client: TelegramClient):
                 return
             sess["api_id"] = text
             sess["action"] = "input_api_hash"
-            prompt = "🔑 <b>Step 2/2:</b> Enter your <b>API_HASH</b>:\n<i>(e.g. b18441a1ff607e10a989891a5462e627)</i>" if lang == "en" else "🔑 <b>Bước 2/2:</b> Nhập <b>API_HASH</b> của bạn:\n<i>(Ví dụ: b18441a1ff607e10a989891a5462e627)</i>"
+            prompt = "🔑 <b>Step 2/2:</b> Enter your own <b>API_HASH</b> from my.telegram.org/apps:" if lang == "en" else "🔑 <b>Bước 2/2:</b> Nhập <b>API_HASH</b> riêng từ my.telegram.org/apps:"
             await event.reply(prompt, parse_mode="html", buttons=get_cancel_keyboard(lang))
 
         elif action == "input_api_hash":
@@ -1131,9 +1123,9 @@ def register_bot_handlers(bot_client: TelegramClient):
 
             msg_wait = await event.reply("⏳ <i>Đang kết nối tới máy chủ Telegram và gửi mã OTP...</i>", parse_mode="html")
 
-            raw_api_id = state.config.get("API_ID", "2040")
-            api_id = int(raw_api_id) if raw_api_id.isdigit() else 2040
-            api_hash = state.config.get("API_HASH", "b18441a1ff607e10a989891a5462e627")
+            raw_api_id = state.config.get("API_ID", "")
+            api_id = int(raw_api_id) if raw_api_id.isdigit() else 0
+            api_hash = state.config.get("API_HASH", "")
 
             try:
                 temp_client = TelegramClient(StringSession(), api_id, api_hash)
@@ -1418,7 +1410,7 @@ def register_bot_handlers(bot_client: TelegramClient):
         # 11. Cài đặt Thời tiết
         elif data == "setup_weather":
             user_sessions[event.sender_id] = {"action": "input_weather_api"}
-            curr = state.config.get("WEATHER_API") or ("Not configured" if lang == "en" else "Chưa cấu hình")
+            curr = secret_status(state.config.get("WEATHER_API"), lang)
             if lang == "en":
                 msg = (
                     f"⛅ <b>CONFIGURE OPENWEATHERMAP API</b>\n"
@@ -1486,7 +1478,7 @@ def register_bot_handlers(bot_client: TelegramClient):
                     "🆔 <b>CONFIGURE TELEGRAM API_ID & API_HASH</b>\n"
                     "Get from https://my.telegram.org\n\n"
                     f"• Current API_ID: <code>{state.config.get('API_ID')}</code>\n"
-                    f"• Current API_HASH: <code>{state.config.get('API_HASH')}</code>\n\n"
+                    f"• API_HASH: {secret_status(state.config.get('API_HASH'), lang)}\n\n"
                     "👉 <b>Step 1/2: Enter your new API_ID:</b>"
                 )
             else:
@@ -1494,7 +1486,7 @@ def register_bot_handlers(bot_client: TelegramClient):
                     "🆔 <b>CẤU HÌNH TELEGRAM API_ID & API_HASH</b>\n"
                     "Lấy tại https://my.telegram.org\n\n"
                     f"• API_ID hiện tại: <code>{state.config.get('API_ID')}</code>\n"
-                    f"• API_HASH hiện tại: <code>{state.config.get('API_HASH')}</code>\n\n"
+                    f"• API_HASH: {secret_status(state.config.get('API_HASH'), lang)}\n\n"
                     "👉 <b>Bước 1/2: Nhập API_ID mới:</b>"
                 )
             await event.respond(msg, parse_mode="html", buttons=get_cancel_keyboard(lang))
@@ -1539,6 +1531,7 @@ def register_bot_handlers(bot_client: TelegramClient):
                 "preset_7": ("{music_or_weather} ⏰ HH:mm", "BIO_FORMAT"),
                 "preset_8": ("📍 {city} • {weather_short} ⏰ HH:mm", "BIO_FORMAT"),
                 "preset_9": ("{music_or_weather} | 📍 {city}", "BIO_FORMAT"),
+                "preset_10": (DEFAULT_NAME_FORMAT, "NAME_FORMAT"),
             }
             preset_info = presets.get(data)
             if preset_info:
@@ -1617,7 +1610,7 @@ def register_bot_handlers(bot_client: TelegramClient):
 
         elif data == "fmt_reset":
             state.update_config({
-                "NAME_FORMAT": "{base_name} | HH:mm - DD/MM/YYYY",
+                "NAME_FORMAT": DEFAULT_NAME_FORMAT,
                 "BIO_FORMAT": "{weather} ⏰ HH:mm"
             })
             state.trigger_update()
@@ -1642,42 +1635,28 @@ def register_bot_handlers(bot_client: TelegramClient):
 
         # 15. Trợ giúp
         elif data == "help":
-            if lang == "en":
-                msg = (
-                    "📖 <b>COMMAND LIST & FEATURES</b>\n"
-                    "━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
-                    "• <b>Login via chat:</b> Tap [⚙️ Settings] -> [🔑 Login Telegram] and follow instructions.\n"
-                    "• <b>Update now:</b> Tap [🔄 Update Now] or type <code>/update</code>.\n"
-                    "• <b>Change name:</b> Type <code>/setname Your Name</code>.\n"
-                    "• <b>Change city:</b> Type <code>/setcity Ha Noi</code>.\n"
-                    "• <b>Switch language:</b> Type <code>/lang en</code> or <code>/lang vi</code>.\n"
-                    "• <b>Start / Stop:</b> Tap [▶️ Start] or [⏹️ Stop]."
-                )
-            else:
-                msg = (
-                    "📖 <b>DANH SÁCH LỆNH & TÍNH NĂNG</b>\n"
-                    "━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
-                    "• <b>Đăng nhập qua chat:</b> Bấm [⚙️ Cài đặt] -> [🔑 Đăng nhập Telegram] và làm theo hướng dẫn.\n"
-                    "• <b>Cập nhật tức thì:</b> Bấm [🔄 Cập nhật ngay] hoặc gõ <code>/update</code>.\n"
-                    "• <b>Đổi tên nhanh:</b> Gõ <code>/setname Tên Của Bạn</code>.\n"
-                    "• <b>Đổi thành phố nhanh:</b> Gõ <code>/setcity Ha Noi</code>.\n"
-                    "• <b>Đổi ngôn ngữ:</b> Gõ <code>/lang en</code> hoặc <code>/lang vi</code>.\n"
-                    "• <b>Bật / Tắt:</b> Bấm [▶️ Chạy] hoặc [⏹️ Dừng]."
-                )
-            await event.respond(msg, parse_mode="html")
+            await event.respond(format_help(lang, helper=True), parse_mode="html")
             await event.answer()
 
 async def run_standalone_bot():
     """Chạy Helper Bot độc lập"""
     state.reload_config()
-    raw_api_id = state.config.get("API_ID", "2040")
-    api_id = int(raw_api_id) if raw_api_id.isdigit() else 2040
-    api_hash = state.config.get("API_HASH", "b18441a1ff607e10a989891a5462e627")
+    raw_api_id = state.config.get("API_ID", "")
+    api_id = int(raw_api_id) if raw_api_id.isdigit() else 0
+    api_hash = state.config.get("API_HASH", "")
     bot_token = state.config.get("BOT_TOKEN", "").strip()
 
     if not bot_token:
         print("[❌] Chưa cấu hình BOT_TOKEN trong file .env!")
         print("Vui lòng cấu hình BOT_TOKEN (lấy từ @BotFather) để khởi chạy Helper Bot.")
+        return
+
+    if api_id <= 0 or not api_hash:
+        print("[❌] Thiếu API_ID/API_HASH riêng. Chạy python setup.py trước.")
+        return
+    admin_id = state.config.get("ADMIN_ID", "")
+    if not admin_id.isdigit() or int(admin_id) <= 0:
+        print("[❌] Cần ADMIN_ID của bạn để dùng Helper Bot. Không tự cấp admin cho người nhắn đầu tiên.")
         return
 
     print("=" * 60)
@@ -1687,24 +1666,30 @@ async def run_standalone_bot():
     bot_client = TelegramClient("helper_bot_session", api_id, api_hash)
     register_bot_handlers(bot_client)
 
-    await bot_client.start(bot_token=bot_token)
-    me = await bot_client.get_me()
-    print(f"[✅] Helper Bot đang hoạt động: @{me.username} (ID: {me.id})")
-    print(f"[ℹ️] ADMIN_ID được cấp phép: {state.config.get('ADMIN_ID') or 'Tự động gán user đầu tiên'}")
+    try:
+        await bot_client.start(bot_token=bot_token)
+        me = await bot_client.get_me()
+        print(f"[✅] Helper Bot đang hoạt động: @{me.username} (ID: {me.id})")
+        print(f"[ℹ️] ADMIN_ID được cấp phép: {admin_id}")
 
-    # Tự động khởi động Profile Updater nếu đã có SESSION_STRING
-    if state.config.get("SESSION_STRING"):
-        print("[🚀] Tự động khởi động Profile Updater...")
-        ok, msg = await engine.start()
-        print(f"[{'✅' if ok else '⚠️'}] {msg}")
-    else:
-        print("[ℹ️] Chưa có SESSION_STRING. Hãy nhắn tin /start với bot trên Telegram và chọn 'Đăng nhập Telegram' để bắt đầu!")
+        # Tự động khởi động Profile Updater nếu đã có SESSION_STRING
+        if state.config.get("SESSION_STRING"):
+            print("[🚀] Tự động khởi động Profile Updater...")
+            ok, msg = await engine.start()
+            print(f"[{'✅' if ok else '⚠️'}] {msg}")
+        else:
+            print("[ℹ️] Chưa có SESSION_STRING. Hãy nhắn tin /start với bot trên Telegram và chọn 'Đăng nhập Telegram' để bắt đầu!")
 
-    print("\nNhấn Ctrl+C để dừng bot.")
-    await bot_client.run_until_disconnected()
+        print("\nNhấn Ctrl+C để dừng bot.")
+        await bot_client.run_until_disconnected()
+    finally:
+        try:
+            await engine.stop()
+        finally:
+            await bot_client.disconnect()
 
 if __name__ == "__main__":
     try:
-        asyncio.run(run_standalone_bot())
+        run_with_restart(run_standalone_bot)
     except (KeyboardInterrupt, SystemExit):
         print("\n[👋] Đã dừng Helper Bot.")

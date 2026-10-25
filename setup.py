@@ -19,7 +19,7 @@ import asyncio
 import subprocess
 import urllib.request
 import urllib.parse
-from datetime import datetime
+from getpass import getpass
 
 ENV_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), ".env")
 REQUIREMENTS_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "requirements.txt")
@@ -33,8 +33,8 @@ BOLD = "\033[1m"
 RESET = "\033[0m"
 
 DEFAULT_CONFIG = {
-    "API_ID": "2040",
-    "API_HASH": "b18441a1ff607e10a989891a5462e627",
+    "API_ID": "",
+    "API_HASH": "",
     "SESSION_STRING": "",
     "SESSION_NAME": "bot",
     "BOT_TOKEN": "",
@@ -44,10 +44,10 @@ DEFAULT_CONFIG = {
     "BASE_NAME": "tên",
     "TIMEZONE": "Asia/Ho_Chi_Minh",
     "LANGUAGE": "vi",
-    "NAME_FORMAT": "{base_name} | HH:mm - DD/MM/YYYY",
+    "NAME_FORMAT": "{base_name} | HH:mm - DD/MM | {gmt} | {random}",
     "BIO_FORMAT": "{weather} ⏰ HH:mm",
     "LASTFM_USERNAME": "",
-    "LASTFM_API_KEY": "b25b959554ed76058ac220b7b2e0a026"
+    "LASTFM_API_KEY": ""
 }
 
 def format_env_val(v) -> str:
@@ -65,7 +65,7 @@ def load_env() -> dict:
         from dotenv import dotenv_values
         vals = dotenv_values(ENV_FILE)
         for k, v in vals.items():
-            if v is not None:
+            if v is not None and (v.strip() or not config.get(k)):
                 config[k] = v.replace("\\n", "\n")
     except Exception as e:
         print(f"{RED}[Lỗi khi đọc .env]: {e}{RESET}")
@@ -95,6 +95,8 @@ def save_env(updates: dict):
             new_lines.append(f"{k}={format_env_val(v)}\n")
 
     with open(ENV_FILE, "w", encoding="utf-8") as f:
+        if os.name == "posix":
+            os.fchmod(f.fileno(), 0o600)
         f.writelines(new_lines)
     print(f"{GREEN}✔ Đã lưu cấu hình vào .env thành công!{RESET}")
 
@@ -129,7 +131,7 @@ def check_dependencies():
 def test_weather_api(api_key: str, city: str):
     city_encoded = urllib.parse.quote(city)
     if api_key:
-        url = f"http://api.openweathermap.org/data/2.5/weather?q={city_encoded}&appid={api_key}&units=metric&lang=vi"
+        url = f"https://api.openweathermap.org/data/2.5/weather?q={city_encoded}&appid={api_key}&units=metric&lang=vi"
         try:
             req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
             with urllib.request.urlopen(req, timeout=6) as resp:
@@ -185,11 +187,13 @@ def test_telegram_bot_token(bot_token: str):
     except Exception as e:
         return False, f"Token không hợp lệ hoặc lỗi kết nối: {e}"
 
-def test_lastfm_user(username: str, api_key: str = "b25b959554ed76058ac220b7b2e0a026") -> tuple:
+def test_lastfm_user(username: str, api_key: str = "") -> tuple:
     if not username:
         return True, "Chưa cấu hình Last.fm (bỏ qua)."
+    if not api_key:
+        return False, "Cần LASTFM_API_KEY riêng từ https://www.last.fm/api/account/create."
     try:
-        key = api_key or "b25b959554ed76058ac220b7b2e0a026"
+        key = api_key
         url = f"https://ws.audioscrobbler.com/2.0/?method=user.getrecenttracks&user={urllib.parse.quote(username)}&api_key={key}&format=json&limit=1"
         req = urllib.request.Request(url, headers={"User-Agent": "TelegramProfileUpdater/1.0"})
         with urllib.request.urlopen(req, timeout=6) as resp:
@@ -221,10 +225,14 @@ def configure_telegram(config: dict) -> dict:
     curr_id = config.get("API_ID", DEFAULT_CONFIG["API_ID"])
     in_id = input(f"Nhập API_ID [{curr_id}]: ").strip()
     api_id = in_id if in_id else curr_id
+    while not api_id.isdigit() or int(api_id) <= 0:
+        api_id = input("API_ID bắt buộc, phải là số dương từ my.telegram.org/apps: ").strip()
 
     curr_hash = config.get("API_HASH", DEFAULT_CONFIG["API_HASH"])
-    in_hash = input(f"Nhập API_HASH [{curr_hash}]: ").strip()
+    in_hash = getpass("Nhập API_HASH (ẩn; Enter giữ giá trị đã lưu): ").strip()
     api_hash = in_hash if in_hash else curr_hash
+    while not api_hash:
+        api_hash = getpass("API_HASH bắt buộc, lấy tại my.telegram.org/apps: ").strip()
 
     updates = {"API_ID": api_id, "API_HASH": api_hash}
 
@@ -257,7 +265,7 @@ def configure_telegram(config: dict) -> dict:
                 updates["ADMIN_ID"] = str(me.id)
         except Exception as e:
             print(f"{RED}✘ Không thể đăng nhập Telegram: {e}{RESET}")
-            manual_s = input("\nBạn có thể dán SESSION_STRING thủ công (hoặc nhấn Enter bỏ qua): ").strip()
+            manual_s = getpass("\nDán SESSION_STRING thủ công (ẩn; Enter bỏ qua): ").strip()
             if manual_s:
                 updates["SESSION_STRING"] = manual_s
 
@@ -270,8 +278,7 @@ def configure_helper_bot(config: dict) -> dict:
     print("(Nếu không dùng Helper Bot qua bot token, bạn vẫn có thể gõ lệnh .name, .update trên userbot)\n")
 
     curr_token = config.get("BOT_TOKEN", "")
-    show_token = (curr_token[:10] + "..." + curr_token[-5:]) if len(curr_token) > 15 else (curr_token or "Chưa cấu hình")
-    in_token = input(f"Nhập BOT_TOKEN [{show_token}]: ").strip()
+    in_token = getpass("Nhập BOT_TOKEN (ẩn; Enter giữ nguyên, 'none' để tắt Helper Bot): ").strip()
 
     if in_token:
         bot_token = "" if in_token.lower() in ("none", "null", "huy", "bo qua", "trong") else in_token
@@ -287,8 +294,10 @@ def configure_helper_bot(config: dict) -> dict:
             print(f"{YELLOW}⚠️ {msg}{RESET}")
 
     curr_admin = config.get("ADMIN_ID", "")
-    in_admin = input(f"Telegram ID của Admin (để trống để tự nhận diện khi đăng nhập) [{curr_admin or 'Tự động'}]: ").strip()
+    in_admin = input(f"Telegram ID của chính bạn [{curr_admin or 'chưa có'}]: ").strip()
     admin_id = in_admin if in_admin else curr_admin
+    while bot_token and (not admin_id.isdigit() or int(admin_id) <= 0):
+        admin_id = input("Bật Helper Bot cần ADMIN_ID của bạn (số dương): ").strip()
 
     return {"BOT_TOKEN": bot_token, "ADMIN_ID": admin_id}
 
@@ -302,8 +311,7 @@ def configure_weather(config: dict) -> dict:
     city = in_city if in_city else curr_city
 
     curr_key = config.get("WEATHER_API", "")
-    show_curr_key = curr_key if curr_key else "Đang để trống"
-    in_key = input(f"Nhập WEATHER_API key [{show_curr_key}]: ").strip()
+    in_key = getpass("Nhập WEATHER_API (ẩn; Enter giữ nguyên, 'none' để dùng wttr.in): ").strip()
     if in_key:
         api_key = "" if in_key.lower() in ("none", "null", "trong", "trống") else in_key
     else:
@@ -333,8 +341,10 @@ def configure_lastfm(config: dict) -> dict:
         username = curr_user
 
     curr_key = config.get("LASTFM_API_KEY", DEFAULT_CONFIG["LASTFM_API_KEY"])
-    in_key = input(f"Nhập Last.fm API Key (nhấn Enter để dùng API Key mặc định có sẵn) [{curr_key[:8]}...]: ").strip()
+    in_key = getpass("Nhập LASTFM_API_KEY riêng (ẩn; Enter giữ nguyên, 'none' để xóa): ").strip()
     api_key = in_key if in_key else curr_key
+    if api_key.lower() in ("none", "null", "0"):
+        api_key = ""
 
     if username:
         print(f"\n{CYAN}Đang kiểm tra tài khoản Last.fm: {username}...{RESET}")
@@ -363,8 +373,8 @@ def configure_display(config: dict) -> dict:
     language = in_lang if in_lang in ("vi", "en") else curr_lang
 
     curr_nfmt = config.get("NAME_FORMAT", DEFAULT_CONFIG["NAME_FORMAT"])
-    print(f"\nCác từ khóa hỗ trợ: {{base_name}}, HH, mm, ss, DD, MM, YYYY, {{thu}}, {{day}}, {{city}}, {{music}}, {{music_or_weather}}")
-    print("Ví dụ mẫu: {base_name} | HH:mm - DD/MM/YYYY hoặc {base_name} | {music_or_weather}")
+    print(f"\nCác từ khóa hỗ trợ: {{base_name}}, HH, mm, ss, DD, MM, YYYY, {{gmt}}, {{random}}, {{thu}}, {{day}}, {{city}}, {{music}}, {{music_or_weather}}")
+    print("Ví dụ mẫu: {base_name} | HH:mm - DD/MM | {gmt} | {random}")
     in_nfmt = input(f"Định dạng Tên (NAME_FORMAT) [{curr_nfmt}]: ").strip()
     name_format = in_nfmt if in_nfmt else curr_nfmt
 
