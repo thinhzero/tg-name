@@ -15,12 +15,43 @@ from i18n import get_text
 from shell_commands import shell_runner, run_shell_message, config_secrets
 
 
+API_ERROR_HINTS = {
+    "query_expired": "Nút bấm đã hết hạn; hãy bấm lại trong Telegram.",
+    "chat_not_found": "Kiểm tra ADMIN_ID và nhấn Start bằng đúng tài khoản admin.",
+    "bot_not_started": "Admin cần nhấn Start trong chat riêng với bot.",
+    "bot_blocked": "Admin cần bỏ chặn bot rồi nhấn Start.",
+    "invalid_html": "Tin nhắn của bot có định dạng HTML không hợp lệ.",
+    "message_not_modified": "Nội dung tin nhắn không thay đổi.",
+}
+
+
 class BotSetupError(Exception):
-    def __init__(self, code, retry_after=0):
-        # Không đưa URL (chứa token), request hay API hash vào lỗi/log.
+    def __init__(self, code, retry_after=0, *, method="", description=""):
+        # Chỉ giữ phương thức nội bộ và lý do được nhận diện; không lưu/in mô tả
+        # thô, URL (chứa token), request, nội dung chat hay API hash vào lỗi/log.
         self.code = code
         self.retry_after = retry_after
-        super().__init__(f"Telegram Bot API error {code}")
+        self.method = method
+        self.reason = ""
+        description = description.lower() if isinstance(description, str) else ""
+        for reason, phrases in (
+            ("query_expired", ("query is too old", "query id is invalid", "response timeout expired")),
+            ("chat_not_found", ("chat not found",)),
+            ("bot_not_started", ("bot can't initiate conversation",)),
+            ("bot_blocked", ("bot was blocked",)),
+            ("invalid_html", ("can't parse entities", "unsupported start tag",)),
+            ("message_not_modified", ("message is not modified",)),
+        ):
+            if any(phrase in description for phrase in phrases):
+                self.reason = reason
+                break
+        super().__init__(self.diagnostic())
+
+    def diagnostic(self):
+        detail = f"{self.method or 'request'}: mã {self.code}"
+        if self.reason:
+            detail += f" — {API_ERROR_HINTS[self.reason]}"
+        return detail
 
 
 class BotAPISetup:
@@ -41,11 +72,14 @@ class BotAPISetup:
             try:
                 data = await response.json(content_type=None)
             except ValueError as exc:
-                raise BotSetupError(response.status) from exc
+                raise BotSetupError(response.status, method=method) from exc
         if not isinstance(data, dict):
-            raise BotSetupError(response.status)
+            raise BotSetupError(response.status, method=method)
         if not data.get("ok"):
-            raise BotSetupError(data.get("error_code", response.status), data.get("parameters", {}).get("retry_after", 0))
+            raise BotSetupError(
+                data.get("error_code", response.status), data.get("parameters", {}).get("retry_after", 0),
+                method=method, description=data.get("description", ""),
+            )
         return data.get("result")
 
     async def send(self, text, keyboard=None):
@@ -97,7 +131,13 @@ class BotAPISetup:
         if callback:
             if not self.authorized(callback.get("message", {}), callback.get("from", {})):
                 return False
-            await self.call("answerCallbackQuery", callback_query_id=callback["id"])
+            try:
+                await self.call("answerCallbackQuery", callback_query_id=callback["id"])
+            except BotSetupError as exc:
+                if exc.code != 400 or exc.reason != "query_expired":
+                    raise
+                print(f"[ℹ️] Bot API {exc.diagnostic()}")
+                return False
             data = callback.get("data", "")
             if data == "updatecheck":
                 await self.check_update()
@@ -239,15 +279,25 @@ async def run_api_setup(token, admin_id):
             try:
                 await setup.show_menu()
             except BotSetupError as exc:
-                if exc.code not in (400, 403):
+                if exc.code != 403 and not (exc.code == 400 and exc.reason in ("chat_not_found", "bot_not_started")):
                     raise
-                print("[ℹ️] Admin cần nhấn Start trước để bot được phép gửi hướng dẫn.")
+                print(f"[ℹ️] Bot API {exc.diagnostic()} Admin cần nhấn Start trước để bot được phép gửi hướng dẫn.")
             offset = 0
             while True:
                 try:
                     updates = await setup.call("getUpdates", offset=offset, timeout=25, allowed_updates=["message", "callback_query"])
                     for update in updates:
-                        configured = await setup.handle(update)
+                        try:
+                            configured = await setup.handle(update)
+                        except BotSetupError as exc:
+                            if exc.code != 400:
+                                raise
+                            # Lỗi request cố định (VD callback hết hạn) không thể
+                            # hết bằng cách đọc lại. Bỏ qua đúng update lỗi, vẫn
+                            # xử lý các update mới trong cùng batch.
+                            offset = update["update_id"] + 1
+                            print(f"[⚠️] Bot API {exc.diagnostic()} Đã bỏ qua sự kiện lỗi; gửi /start hoặc bấm lại nút.")
+                            continue
                         offset = update["update_id"] + 1
                         if configured:
                             # Xác nhận update chứa hash trước khi chuyển transport.
@@ -257,14 +307,14 @@ async def run_api_setup(token, admin_id):
                                 pass
                             return True
                 except BotSetupError as exc:
-                    if exc.code in (401, 403, 409):
+                    if exc.code in (400, 401, 403, 404, 409):
                         raise
-                    print(f"[⚠️] Bot API mã {exc.code}; đang thử lại.")
+                    print(f"[⚠️] Bot API {exc.diagnostic()} Đang thử lại.")
                     await asyncio.sleep(max(2, exc.retry_after))
                 except (aiohttp.ClientError, asyncio.TimeoutError):
                     print("[⚠️] Mạng Bot API gián đoạn; đang thử lại.")
                     await asyncio.sleep(2)
         except (BotSetupError, aiohttp.ClientError, asyncio.TimeoutError) as exc:
-            code = exc.code if isinstance(exc, BotSetupError) else type(exc).__name__
-            print(f"[❌] Không chạy được bước cài đặt Bot API ({code}). Kiểm tra token/mạng và bảo đảm chỉ chạy một bản bot.")
+            detail = exc.diagnostic() if isinstance(exc, BotSetupError) else type(exc).__name__
+            print(f"[❌] Không chạy được bước cài đặt Bot API ({detail}). Kiểm tra token/mạng và bảo đảm chỉ chạy một bản bot.")
             return False

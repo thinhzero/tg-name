@@ -353,6 +353,8 @@ Repo này công khai nên chức năng cập nhật **không cần GitHub token*
 | Thiếu API_ID/API_HASH | Nếu đã có token + admin: mở bot và /start để nhập API. Nếu không dùng Helper Bot: cấu hình bằng setup.py |
 | Chưa đăng nhập / session hết hạn | Chạy lại bước đăng nhập trong `setup.py` |
 | Helper Bot báo thiếu ADMIN_ID | Điền ID số của bạn; bot không cấp admin cho người nhắn đầu tiên |
+| Bot API `answerCallbackQuery: mã 400` / nút hết hạn | Bấm lại nút hoặc gửi `/start`. Bản mới bỏ qua sự kiện lỗi, không đọc lại vô hạn |
+| Bot API báo lỗi 400 khác | Xem tên phương thức và gợi ý trong log. Với `chat not found`, kiểm tra ADMIN_ID và nhấn Start bằng đúng tài khoản; không cần xóa `.env` |
 | `.status` không trả lời | Dùng chính tài khoản đã đăng nhập, kiểm tra tiến trình còn chạy |
 | Thiếu module Python | Kích hoạt `.venv`, cài lại `requirements.txt`, dùng đúng interpreter của PM2 |
 | Tên/bio bị cắt | Rút ngắn mẫu hoặc random; xem `.preview` / `.previewbio` |

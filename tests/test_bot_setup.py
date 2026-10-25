@@ -122,6 +122,22 @@ class BotAPISetupTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(self.setup.api_id, "")
         self.save.assert_not_called()
 
+    async def test_expired_callback_is_ignored_without_running_its_action(self):
+        self.setup.call.side_effect = self.module.BotSetupError(
+            400, method="answerCallbackQuery",
+            description="Bad Request: query is too old and response timeout expired or query ID is invalid",
+        )
+        self.setup.offer_reset = AsyncMock()
+        self.assertFalse(await self.setup.handle(self.callback("reset_request")))
+        self.setup.call.assert_awaited_once_with("answerCallbackQuery", callback_query_id="callback")
+        self.setup.offer_reset.assert_not_awaited()
+        self.save.assert_not_called()
+
+    async def test_other_callback_errors_are_not_silently_ignored(self):
+        self.setup.call.side_effect = self.module.BotSetupError(429, 3, method="answerCallbackQuery")
+        with self.assertRaises(self.module.BotSetupError):
+            await self.setup.handle(self.callback())
+
     async def test_write_failure_keeps_hash_step_for_retry(self):
         await self.enter_id()
         self.save.side_effect = PermissionError("denied")
@@ -164,6 +180,119 @@ class BotAPISetupTests(unittest.IsolatedAsyncioTestCase):
         self.save.assert_called_once_with({"API_ID": "123", "API_HASH": self.hash})
         session.__aexit__.assert_awaited_once()
 
+    async def test_bad_callback_does_not_poison_pending_update_queue(self):
+        updates = [self.callback(), self.callback(), self.message("123"), self.message(self.hash)]
+        updates[0]["callback_query"]["id"] = "expired-callback"
+        for index, update in enumerate(updates, start=1):
+            update["update_id"] = index
+        offsets = []
+        rejected = []
+
+        async def call(instance, method, **payload):
+            if method == "getMe":
+                return {"username": "TestHelper"}
+            if method == "getWebhookInfo":
+                return {"url": ""}
+            if method == "getUpdates":
+                offsets.append(payload["offset"])
+                if len(offsets) == 1:
+                    return updates
+                self.assertEqual(payload["offset"], 5, "Failed updates must be acknowledged, not replayed forever")
+                return []
+            if method == "answerCallbackQuery" and payload["callback_query_id"] == "expired-callback":
+                rejected.append(payload["callback_query_id"])
+                raise self.module.BotSetupError(400)
+            return {}
+
+        session = Mock(__aenter__=AsyncMock(return_value=Mock()), __aexit__=AsyncMock(return_value=False))
+        with patch.object(self.module.time, "time", return_value=self.setup.started_at):
+            with patch.object(self.module.aiohttp, "ClientSession", return_value=session):
+                with patch.object(self.module.BotAPISetup, "call", call):
+                    with patch.object(self.module.BotAPISetup, "validate_api", new=AsyncMock()):
+                        with patch.object(self.module.asyncio, "sleep", new=AsyncMock()):
+                            self.assertTrue(await self.module.run_api_setup("fake-bot-token", "42"))
+        self.assertEqual(offsets, [0, 5])
+        self.assertEqual(rejected, ["expired-callback"])
+        self.save.assert_called_once_with({"API_ID": "123", "API_HASH": self.hash})
+
+    async def test_rate_limited_update_is_retried_without_skipping_it(self):
+        updates = [self.callback(), self.message("123"), self.message(self.hash)]
+        for index, update in enumerate(updates, start=1):
+            update["update_id"] = index
+        offsets = []
+        attempts = []
+
+        async def call(instance, method, **payload):
+            if method == "getMe":
+                return {"username": "TestHelper"}
+            if method == "getWebhookInfo":
+                return {"url": ""}
+            if method == "getUpdates":
+                offsets.append(payload["offset"])
+                self.assertLessEqual(len(offsets), 3)
+                return updates if payload["offset"] == 0 else []
+            if method == "answerCallbackQuery":
+                attempts.append(method)
+                if len(attempts) == 1:
+                    raise self.module.BotSetupError(429, 3, method=method)
+            return {}
+
+        session = Mock(__aenter__=AsyncMock(return_value=Mock()), __aexit__=AsyncMock(return_value=False))
+        with patch.object(self.module.time, "time", return_value=self.setup.started_at):
+            with patch.object(self.module.aiohttp, "ClientSession", return_value=session):
+                with patch.object(self.module.BotAPISetup, "call", call):
+                    with patch.object(self.module.BotAPISetup, "validate_api", new=AsyncMock()):
+                        with patch.object(self.module.asyncio, "sleep", new=AsyncMock()) as sleep:
+                            self.assertTrue(await self.module.run_api_setup("fake-bot-token", "42"))
+        self.assertEqual(offsets, [0, 0, 4])
+        sleep.assert_awaited_once_with(3)
+        self.save.assert_called_once_with({"API_ID": "123", "API_HASH": self.hash})
+
+    async def test_get_updates_bad_request_stops_instead_of_retrying_forever(self):
+        session = Mock(__aenter__=AsyncMock(return_value=Mock()), __aexit__=AsyncMock(return_value=False))
+        call = AsyncMock(side_effect=[
+            {"username": "TestHelper"}, {"url": ""}, {},
+            self.module.BotSetupError(400, method="getUpdates", description="secret: fake-bot-token " + self.hash),
+        ])
+        with patch.object(self.module.aiohttp, "ClientSession", return_value=session):
+            with patch.object(self.module.BotAPISetup, "call", call):
+                with patch.object(self.module.asyncio, "sleep", new=AsyncMock()) as sleep:
+                    with patch("builtins.print") as output:
+                        self.assertFalse(await self.module.run_api_setup("fake-bot-token", "42"))
+        self.assertEqual(call.await_count, 4)
+        sleep.assert_not_awaited()
+        self.assertIn("getUpdates: mã 400", str(output.call_args_list))
+        self.assertNotIn("fake-bot-token", str(output.call_args_list))
+        self.assertNotIn(self.hash, str(output.call_args_list))
+
+    async def test_invalid_menu_html_is_not_misreported_as_admin_needing_start(self):
+        session = Mock(__aenter__=AsyncMock(return_value=Mock()), __aexit__=AsyncMock(return_value=False))
+        call = AsyncMock(side_effect=[
+            {"username": "TestHelper"}, {"url": ""},
+            self.module.BotSetupError(400, method="sendMessage", description="Bad Request: can't parse entities"),
+        ])
+        with patch.object(self.module.aiohttp, "ClientSession", return_value=session):
+            with patch.object(self.module.BotAPISetup, "call", call):
+                with patch("builtins.print") as output:
+                    self.assertFalse(await self.module.run_api_setup("fake-bot-token", "42"))
+        self.assertEqual(call.await_count, 3)
+        self.assertIn("sendMessage: mã 400", str(output.call_args_list))
+        self.assertIn("HTML", str(output.call_args_list))
+        self.assertNotIn("Admin cần nhấn Start", str(output.call_args_list))
+
+    async def test_chat_not_found_does_not_stop_polling_for_admin_start(self):
+        session = Mock(__aenter__=AsyncMock(return_value=Mock()), __aexit__=AsyncMock(return_value=False))
+        call = AsyncMock(side_effect=[
+            {"username": "TestHelper"}, {"url": ""},
+            self.module.BotSetupError(400, method="sendMessage", description="Bad Request: chat not found"),
+            asyncio.CancelledError(),
+        ])
+        with patch.object(self.module.aiohttp, "ClientSession", return_value=session):
+            with patch.object(self.module.BotAPISetup, "call", call):
+                with self.assertRaises(asyncio.CancelledError):
+                    await self.module.run_api_setup("fake-bot-token", "42")
+        self.assertEqual(call.call_args.args[0], "getUpdates")
+
     async def test_existing_webhook_is_not_removed(self):
         session = Mock(__aenter__=AsyncMock(return_value=Mock()), __aexit__=AsyncMock(return_value=False))
         call = AsyncMock(side_effect=[{"username": "TestHelper"}, {"url": "https://example.com/hook"}])
@@ -191,6 +320,63 @@ class BotAPISetupTests(unittest.IsolatedAsyncioTestCase):
                     await self.module.run_api_setup("fake-bot-token", "42")
         self.assertEqual(call.call_args.args[0], "getUpdates")
         session.__aexit__.assert_awaited_once()
+
+
+@unittest.skipUnless(HAS_DEPENDENCIES, "Cài requirements.txt để kiểm thử Bot API")
+class BotAPICallTests(unittest.IsolatedAsyncioTestCase):
+    def setup_response(self, data, status=400):
+        import bot_setup
+        self.module = bot_setup
+        response = SimpleNamespace(status=status, json=AsyncMock(return_value=data))
+        request = Mock(__aenter__=AsyncMock(return_value=response), __aexit__=AsyncMock(return_value=False))
+        session = Mock(post=Mock(return_value=request))
+        return bot_setup.BotAPISetup(session, "fake-bot-token", "42"), response
+
+    async def test_success_returns_result_without_changing_large_admin_ids(self):
+        setup, _ = self.setup_response({"ok": True, "result": {"message_id": 7}}, status=200)
+        admin_id = 2 ** 33 + 42
+        setup.admin_id = admin_id
+        self.assertEqual(await setup.send("test"), {"message_id": 7})
+        self.assertEqual(setup.session.post.call_args.kwargs["json"]["chat_id"], admin_id)
+
+    async def test_error_keeps_method_and_safe_reason_not_raw_description(self):
+        secret_hash = "a" * 32
+        setup, _ = self.setup_response({
+            "ok": False, "error_code": 400,
+            "description": "Bad Request: query is too old; secret fake-bot-token " + secret_hash,
+        })
+        with self.assertRaises(self.module.BotSetupError) as caught:
+            await setup.call("answerCallbackQuery", callback_query_id="old-query")
+        error = caught.exception
+        self.assertEqual(error.method, "answerCallbackQuery")
+        self.assertEqual(error.reason, "query_expired")
+        self.assertIn("answerCallbackQuery: mã 400", str(error))
+        for secret in ("fake-bot-token", secret_hash, "old-query"):
+            self.assertNotIn(secret, str(error))
+            self.assertNotIn(secret, repr(vars(error)))
+
+    async def test_rate_limit_preserves_retry_after(self):
+        setup, _ = self.setup_response({"ok": False, "error_code": 429, "parameters": {"retry_after": 5}}, status=429)
+        with self.assertRaises(self.module.BotSetupError) as caught:
+            await setup.call("getUpdates")
+        self.assertEqual(caught.exception.retry_after, 5)
+        self.assertEqual(caught.exception.method, "getUpdates")
+
+    async def test_malformed_json_keeps_method_without_logging_response_body(self):
+        setup, response = self.setup_response(None, status=502)
+        response.json.side_effect = ValueError("fake-bot-token private response")
+        with self.assertRaises(self.module.BotSetupError) as caught:
+            await setup.call("getUpdates")
+        self.assertEqual(caught.exception.method, "getUpdates")
+        self.assertEqual(caught.exception.code, 502)
+        self.assertNotIn("fake-bot-token", str(caught.exception))
+
+    async def test_non_object_json_is_reported_without_echoing_it(self):
+        setup, _ = self.setup_response(["fake-bot-token"], status=502)
+        with self.assertRaises(self.module.BotSetupError) as caught:
+            await setup.call("getUpdates")
+        self.assertEqual(caught.exception.method, "getUpdates")
+        self.assertNotIn("fake-bot-token", str(caught.exception))
 
 
 @unittest.skipUnless(HAS_DEPENDENCIES, "Cài requirements.txt để kiểm thử đăng nhập qua bot")
