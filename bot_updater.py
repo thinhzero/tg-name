@@ -1,18 +1,21 @@
-"""Tải bản mới từ GitHub, cập nhật fast-forward và khởi động lại tiến trình."""
+"""So sánh commit GitHub, hỏi xác nhận rồi snapshot/update/restart đúng phiên bản."""
 
 import asyncio
 import os
+import secrets
 import shutil
 import signal
 import subprocess
 import sys
 import tempfile
+import time
 import tokenize
 from dataclasses import dataclass
 from html import escape
 from pathlib import Path
 
 from i18n import get_text
+from code_snapshot import SNAPSHOT_DIR, create_snapshot
 
 
 REPO_URL = "https://github.com/thinhzero/tg-name.git"
@@ -38,6 +41,47 @@ class UpdateResult:
     current: str
     latest: str
     updated: bool = False
+    snapshot: str = ""
+
+
+@dataclass(frozen=True)
+class UpdatePlan:
+    current: str
+    latest: str
+    ahead: int = 0
+    local_ahead: int = 0
+
+
+class UpdateRequests:
+    def __init__(self):
+        self.pending = {}
+
+    def create(self, owner_id, plan, userbot=False):
+        token = secrets.token_urlsafe(12)
+        self.pending[(owner_id, userbot)] = (token, time.monotonic() + 300, plan)
+        return token
+
+    def consume(self, owner_id, token, userbot=False):
+        if not isinstance(token, str) or not token.isascii() or len(token) > 128:
+            return None
+        request = self.pending.get((owner_id, userbot))
+        if not request or not secrets.compare_digest(request[0], token):
+            return None
+        self.pending.pop((owner_id, userbot))
+        return request[2] if request[1] >= time.monotonic() else None
+
+    def cancel(self, owner_id, userbot=False):
+        self.pending.pop((owner_id, userbot), None)
+
+
+update_requests = UpdateRequests()
+
+
+def update_buttons(token, lang="vi"):
+    return [[
+        {"text": "✅ Yes, update" if lang == "en" else "✅ Có, cập nhật", "callback_data": f"update_confirm:{token}"},
+        {"text": "❌ No" if lang == "en" else "❌ Không", "callback_data": f"update_cancel:{token}"},
+    ]]
 
 
 class BotUpdater:
@@ -122,17 +166,17 @@ class BotUpdater:
         for filename in files:
             path = Path(filename)
             # Không bao giờ lấy cấu hình/dữ liệu cá nhân từ bản cập nhật.
-            if path.name in (".env", "name.txt") or ".session" in path.suffixes or ".session-" in path.name:
+            if (path.name in (".env", "name.txt") or ".session" in path.suffixes or ".session-" in path.name
+                    or SNAPSHOT_DIR in path.parts or (path.name.startswith(".env.") and path.name != ".env.example")):
                 raise UpdateError("self_update_unsafe_file", filename=filename)
             if path.suffix == ".py":
                 with tokenize.open(source / path) as handle:
                     compile(handle.read(), filename, "exec")
 
-    async def update(self, progress):
-        """Chỉ thay mã nguồn sau khi tải, kiểm tra và cài dependencies thành công."""
+    async def check(self):
+        """Chỉ fetch lịch sử để đếm commit; không clone/checkout/cài thư viện."""
         if self.is_busy:
             raise UpdateError("self_update_busy")
-
         async with self._lock:
             if not shutil.which("git"):
                 raise UpdateError("self_update_missing_git")
@@ -142,8 +186,36 @@ class BotUpdater:
             remote = await self._git("ls-remote", "--exit-code", REPO_URL, f"refs/heads/{UPDATE_BRANCH}")
             latest = remote.stdout.split()[0]
             if current == latest:
-                return UpdateResult(current, latest)
+                return UpdatePlan(current, latest)
+            shallow = (await self._git("rev-parse", "--is-shallow-repository")).stdout == "true"
+            args = ["fetch", "--quiet", "--no-tags", "--no-write-fetch-head"]
+            if shallow:
+                args.append("--unshallow")
+            await self._git(*args, "--", REPO_URL, latest, timeout=180)
+            counts = (await self._git("rev-list", "--left-right", "--count", f"{current}...{latest}")).stdout.split()
+            if (await self._git("rev-parse", "HEAD")).stdout != current:
+                raise UpdateError("self_update_changed")
+            return UpdatePlan(current, latest, ahead=int(counts[1]), local_ahead=int(counts[0]))
 
+    async def update(self, progress, *, plan=None, secret_values=()):
+        """Chỉ áp dụng đúng commit đã được người dùng xác nhận."""
+        if self.is_busy:
+            raise UpdateError("self_update_busy")
+        if not isinstance(plan, UpdatePlan):
+            raise UpdateError("self_update_confirmation_required")
+        async with self._lock:
+            if not shutil.which("git"):
+                raise UpdateError("self_update_missing_git")
+            await self._check_checkout()
+            current = (await self._git("rev-parse", "HEAD")).stdout
+            if current != plan.current:
+                raise UpdateError("self_update_changed")
+            latest = plan.latest
+            if latest == current:
+                return UpdateResult(current, latest)
+            ancestor = await self._git("merge-base", "--is-ancestor", current, latest, allowed_codes=(0, 1))
+            if plan.local_ahead or ancestor.returncode:
+                raise UpdateError("self_update_diverged")
             await self._check_clean()
             await progress("self_update_downloading")
             with tempfile.TemporaryDirectory(prefix="tg-name-update-") as temp_dir:
@@ -152,14 +224,11 @@ class BotUpdater:
                     "clone", "--quiet", "--single-branch", "--branch", UPDATE_BRANCH,
                     "--", REPO_URL, str(source), timeout=180,
                 )
-                latest = (await self._git("rev-parse", "HEAD", cwd=source)).stdout
-                if latest == current:
-                    return UpdateResult(current, latest)
+                # Nhánh main có thể có commit mới sau lúc bấm Có; chỉ lấy đúng
+                # commit đã hiện ở màn hình xác nhận, không tự mở rộng phạm vi.
+                await self._git("checkout", "--quiet", "--detach", latest, cwd=source)
                 # Fetch từ bản clone đã kiểm tra, không thay remote origin của người dùng.
-                await self._git("fetch", "--quiet", "--no-tags", "--", str(source), f"refs/heads/{UPDATE_BRANCH}")
-                ancestor = await self._git("merge-base", "--is-ancestor", current, latest, allowed_codes=(0, 1))
-                if ancestor.returncode:
-                    raise UpdateError("self_update_diverged")
+                await self._git("fetch", "--quiet", "--no-tags", "--no-write-fetch-head", "--", str(source), latest)
 
                 await progress("self_update_validating")
                 tracked = (await self._git("ls-files", "-z", cwd=source)).stdout
@@ -168,6 +237,19 @@ class BotUpdater:
                     self._validate_source(source, files)
                 except (SyntaxError, UnicodeError, OSError) as exc:
                     raise UpdateError("self_update_invalid_source", details=str(exc)) from exc
+
+                await self._check_clean()
+                if (await self._git("rev-parse", "HEAD")).stdout != current:
+                    raise UpdateError("self_update_changed")
+                await progress("self_update_snapshot")
+                local_files = (await self._git("ls-files", "--cached", "--others", "--exclude-standard", "-z")).stdout
+                try:
+                    snapshot = await asyncio.to_thread(
+                        create_snapshot, self.project_dir, [path for path in local_files.split("\0") if path],
+                        current, latest, secret_values,
+                    )
+                except (OSError, ValueError) as exc:
+                    raise UpdateError("self_update_snapshot_failed", details=type(exc).__name__) from exc
 
                 requirements = source / "requirements.txt"
                 installed = self.project_dir / "requirements.txt"
@@ -185,7 +267,7 @@ class BotUpdater:
                 await self._git("merge", "--ff-only", "--no-edit", "--no-overwrite-ignore", latest)
 
             self._restart_pending = True
-            return UpdateResult(current, latest, updated=True)
+            return UpdateResult(current, latest, updated=True, snapshot=snapshot)
 
     def request_restart(self):
         self.restart_event.set()
@@ -194,25 +276,59 @@ class BotUpdater:
 bot_updater = BotUpdater()
 
 
-async def run_update_check(edit, lang="vi", updater=bot_updater):
-    """Luồng cập nhật dùng chung cho tin nhắn Telethon và Bot API."""
+async def show_update_error(edit, exc, lang):
+    if isinstance(exc, UpdateError):
+        details = {key: escape(str(value)) for key, value in exc.details.items()}
+        await edit(get_text(exc.key, lang, **details), parse_mode="html")
+    else:
+        await edit(get_text("self_update_command_failed", lang, details=escape(str(exc)[:1800])), parse_mode="html")
+
+
+async def run_update_check(edit, lang="vi", updater=bot_updater, *, owner_id=0, userbot=False):
+    """Chỉ kiểm tra và hỏi; không bao giờ tự áp dụng khi gọi /updatecheck."""
+    update_requests.cancel(owner_id, userbot)
+    try:
+        plan = await updater.check()
+    except Exception as exc:
+        await show_update_error(edit, exc, lang)
+        return
+    if not plan.ahead and not plan.local_ahead:
+        await edit(get_text("self_update_latest", lang, commit=plan.current[:7]), parse_mode="html")
+        return
+    if plan.local_ahead:
+        await edit(get_text("self_update_compare_diverged", lang, ahead=plan.ahead, local=plan.local_ahead), parse_mode="html")
+        return
+    token = update_requests.create(owner_id, plan, userbot)
+    text = get_text("self_update_offer", lang, count=plan.ahead, old=plan.current[:7], new=plan.latest[:7])
+    if userbot:
+        text += get_text("self_update_text_confirm", lang, token=token)
+        await edit(text, parse_mode="html")
+    else:
+        await edit(text, parse_mode="html", buttons=update_buttons(token, lang))
+
+
+async def run_update_action(edit, owner_id, token, lang="vi", updater=bot_updater, *, confirm=True, userbot=False, secret_values=()):
+    plan = update_requests.consume(owner_id, token, userbot)
+    if plan is None:
+        await edit(get_text("self_update_expired", lang), parse_mode="html")
+        return
+    if not confirm:
+        await edit(get_text("self_update_cancelled", lang), parse_mode="html")
+        return
+
     async def progress(key):
         await edit(get_text(key, lang), parse_mode="html")
 
     try:
-        result = await updater.update(progress)
-    except UpdateError as exc:
-        details = {key: escape(str(value)) for key, value in exc.details.items()}
-        await edit(get_text(exc.key, lang, **details), parse_mode="html")
-        return
+        result = await updater.update(progress, plan=plan, secret_values=secret_values)
     except Exception as exc:
-        await edit(get_text("self_update_command_failed", lang, details=escape(str(exc)[:1800])), parse_mode="html")
+        await show_update_error(edit, exc, lang)
         return
     if not result.updated:
         await edit(get_text("self_update_latest", lang, commit=result.current[:7]), parse_mode="html")
         return
     try:
-        await edit(get_text("self_update_restarting", lang, old=result.current[:7], new=result.latest[:7]), parse_mode="html")
+        await edit(get_text("self_update_restarting", lang, old=result.current[:7], new=result.latest[:7], snapshot=escape(result.snapshot)), parse_mode="html")
     finally:
         updater.request_restart()
 

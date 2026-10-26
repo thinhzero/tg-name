@@ -3,7 +3,7 @@ import unittest
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, Mock, patch
 
-from bot_updater import UpdateResult
+from bot_updater import UpdateResult, UpdatePlan, update_requests
 from shell_commands import ShellError, ShellResult
 
 
@@ -28,7 +28,7 @@ class AdminToolsTests(unittest.IsolatedAsyncioTestCase):
         import bot_setup
         self.helper = helper_bot
         self.bootstrap = bot_setup
-        self.updater = SimpleNamespace(update=AsyncMock(return_value=UpdateResult("abcdef123", "abcdef123")), request_restart=Mock())
+        self.updater = SimpleNamespace(check=AsyncMock(return_value=UpdatePlan("abcdef123", "abcdef123")), update=AsyncMock(return_value=UpdateResult("abcdef123", "abcdef123")), request_restart=Mock())
         self.runner = SimpleNamespace(run=AsyncMock(return_value=ShellResult("uptime", "up 1 day", 0)))
         for patcher in (
             patch.dict(helper_bot.state.config, {"ADMIN_ID": "42", "LANGUAGE": "vi", "BOT_TOKEN": "private-bot-token"}),
@@ -38,6 +38,7 @@ class AdminToolsTests(unittest.IsolatedAsyncioTestCase):
             patch.object(helper_bot, "shell_runner", self.runner),
             patch.object(bot_setup, "shell_runner", self.runner),
             patch.dict(helper_bot.user_sessions, {}, clear=True),
+            patch.dict(update_requests.pending, {}, clear=True),
         ):
             patcher.start()
             self.addCleanup(patcher.stop)
@@ -61,14 +62,20 @@ class AdminToolsTests(unittest.IsolatedAsyncioTestCase):
     async def test_update_button_uses_existing_update_flow(self):
         handler, _ = self.client.handlers["callback_handler"]
         await handler(self.event(data="updatecheck"))
-        self.updater.update.assert_awaited_once()
+        self.updater.check.assert_awaited_once()
+        self.updater.update.assert_not_awaited()
         self.assertIn("mới nhất", self.message.edit.call_args.args[0])
         self.updater.request_restart.assert_not_called()
 
     async def test_update_button_restarts_if_update_was_applied(self):
+        self.updater.check.return_value = UpdatePlan("old", "new", ahead=2)
         self.updater.update.return_value = UpdateResult("old", "new", updated=True)
         handler, _ = self.client.handlers["callback_handler"]
         await handler(self.event(data="updatecheck"))
+        self.updater.update.assert_not_awaited()
+        self.updater.request_restart.assert_not_called()
+        token = update_requests.pending[(42, False)][0]
+        await handler(self.event(data=f"update_confirm:{token}"))
         self.updater.request_restart.assert_called_once()
 
     async def test_update_button_does_not_accept_non_admin_or_group_clicks(self):
@@ -76,6 +83,24 @@ class AdminToolsTests(unittest.IsolatedAsyncioTestCase):
         await handler(self.event(data="updatecheck", sender=99))
         await handler(self.event(data="updatecheck", private=False))
         self.updater.update.assert_not_awaited()
+
+    async def test_update_no_button_does_not_apply_or_restart(self):
+        self.updater.check.return_value = UpdatePlan("old", "new", ahead=2)
+        handler, _ = self.client.handlers["callback_handler"]
+        await handler(self.event(data="updatecheck"))
+        token = update_requests.pending[(42, False)][0]
+        await handler(self.event(data=f"update_cancel:{token}"))
+        self.updater.update.assert_not_awaited()
+        self.updater.request_restart.assert_not_called()
+        self.assertIn("không cập nhật", self.message.edit.call_args.args[0])
+
+    async def test_non_admin_or_group_cannot_consume_update_confirmation(self):
+        token = update_requests.create(42, UpdatePlan("old", "new", ahead=1))
+        handler, _ = self.client.handlers["callback_handler"]
+        await handler(self.event(data=f"update_confirm:{token}", sender=99))
+        await handler(self.event(data=f"update_confirm:{token}", private=False))
+        self.updater.update.assert_not_awaited()
+        self.assertIn((42, False), update_requests.pending)
 
     async def test_shell_command_supports_bot_username_and_arbitrary_arguments(self):
         handler, builder = self.client.handlers["shell_cmd"]
@@ -137,7 +162,7 @@ class AdminToolsTests(unittest.IsolatedAsyncioTestCase):
         await setup.handle(callback(42, "group"))
         self.updater.update.assert_not_awaited()
         await setup.handle(callback(42))
-        self.updater.update.assert_awaited_once()
+        self.updater.check.assert_awaited_once()
 
     async def test_bootstrap_update_command_preserves_api_input(self):
         setup = self.setup_bot()
@@ -145,8 +170,26 @@ class AdminToolsTests(unittest.IsolatedAsyncioTestCase):
         await setup.handle({"message": {
             "date": setup.started_at, "from": {"id": 42}, "chat": {"id": 42, "type": "private"}, "text": "/updatecheck",
         }})
-        self.updater.update.assert_awaited_once()
+        self.updater.check.assert_awaited_once()
         self.assertEqual(setup.action, "api_hash")
+
+    async def test_bootstrap_yes_and_no_use_the_same_confirmation_flow(self):
+        self.updater.check.return_value = UpdatePlan("old", "new", ahead=3)
+        setup = self.setup_bot()
+        def callback(data):
+            return {"callback_query": {"id": "cb", "data": data, "from": {"id": 42}, "message": {"message_id": 77, "chat": {"id": 42, "type": "private"}}}}
+        await setup.handle(callback("updatecheck"))
+        self.updater.update.assert_not_awaited()
+        token = update_requests.pending[(42, False)][0]
+        await setup.handle(callback(f"update_cancel:{token}"))
+        self.updater.update.assert_not_awaited()
+        await setup.handle(callback("updatecheck"))
+        token = update_requests.pending[(42, False)][0]
+        self.updater.update.return_value = UpdateResult("old", "new", updated=True, snapshot="snapshots/example")
+        await setup.handle(callback(f"update_confirm:{token}"))
+        self.updater.update.assert_awaited_once()
+        self.updater.request_restart.assert_called_once()
+        self.assertTrue(any("snapshots/example" in call.kwargs.get("text", "") for call in setup.call.call_args_list))
 
     async def test_bootstrap_shell_runs_before_api_configuration(self):
         setup = self.setup_bot()

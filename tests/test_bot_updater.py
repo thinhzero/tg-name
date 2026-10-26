@@ -1,5 +1,6 @@
 import asyncio
 import os
+import json
 import subprocess
 import tempfile
 import unittest
@@ -41,12 +42,114 @@ class BotUpdaterTests(unittest.IsolatedAsyncioTestCase):
         patcher.start()
         self.addCleanup(patcher.stop)
 
+    async def apply_update(self, progress=None):
+        plan = await self.updater.check()
+        return await self.updater.update(progress or self.progress, plan=plan)
+
     async def test_no_update_does_not_clone_or_restart(self):
-        result = await self.updater.update(self.progress)
+        result = await self.apply_update()
         self.assertFalse(result.updated)
         self.assertEqual(result.current, self.initial)
         self.progress.assert_not_awaited()
         self.assertFalse(self.updater.restart_event.is_set())
+
+    async def test_check_counts_new_commits_without_clone_pip_snapshot_or_checkout(self):
+        for version in (2, 3, 4):
+            (self.remote / "name.py").write_text(f"VERSION = {version}\n")
+            self.commit(f"Version {version}")
+        original_run = self.updater._run
+        commands = []
+        refs = self.git(self.local, "show-ref")
+        async def run(*command, **kwargs):
+            commands.append(command)
+            return await original_run(*command, **kwargs)
+        with patch.object(self.updater, "_run", side_effect=run):
+            plan = await self.updater.check()
+        self.assertEqual(plan.ahead, 3)
+        self.assertEqual(plan.local_ahead, 0)
+        self.assertFalse(any("clone" in command or "checkout" in command or "pip" in command for command in commands))
+        self.assertEqual((self.local / "name.py").read_text(), "VERSION = 1\n")
+        self.assertEqual(self.git(self.local, "rev-parse", "HEAD"), self.initial)
+        self.assertEqual(self.git(self.local, "show-ref"), refs)
+        self.assertFalse((self.local / "snapshots").exists())
+        self.assertFalse((self.local / ".git/FETCH_HEAD").exists())
+
+    async def test_update_without_confirmation_plan_is_rejected(self):
+        with self.assertRaises(UpdateError) as error:
+            await self.updater.update(self.progress)
+        self.assertEqual(error.exception.key, "self_update_confirmation_required")
+        self.assertFalse((self.local / "snapshots").exists())
+
+    async def test_only_the_approved_commit_is_applied_and_old_code_is_backed_up(self):
+        (self.remote / "name.py").write_text("VERSION = 2\n")
+        approved = self.commit("Approved version")
+        plan = await self.updater.check()
+        (self.remote / "name.py").write_text("VERSION = 3\n")
+        unapproved = self.commit("Newer version after confirmation screen")
+        result = await self.updater.update(self.progress, plan=plan)
+        self.assertEqual(result.latest, approved)
+        self.assertNotEqual(result.latest, unapproved)
+        self.assertEqual(self.git(self.local, "rev-parse", "HEAD"), approved)
+        self.assertEqual((self.local / "name.py").read_text(), "VERSION = 2\n")
+        snapshot = self.local / result.snapshot
+        self.assertEqual((snapshot / "code/name.py").read_text(), "VERSION = 1\n")
+        metadata = json.loads((snapshot / "snapshot.json").read_text())
+        self.assertEqual(metadata["from_commit"], self.initial)
+        self.assertEqual(metadata["to_commit"], approved)
+
+    async def test_untracked_source_is_snapshotted_but_secrets_and_runtime_are_not(self):
+        (self.local / "local_test.py").write_text('VALUE = "known-private-value"\n')
+        (self.local / ".env").write_text("BOT_TOKEN=real-private-bot-token\n")
+        (self.local / "helper.session").write_text("private session")
+        (self.remote / "name.py").write_text("VERSION = 2\n")
+        self.commit("Update")
+        plan = await self.updater.check()
+        result = await self.updater.update(self.progress, plan=plan, secret_values=["known-private-value"])
+        code = self.local / result.snapshot / "code"
+        self.assertIn("[REDACTED]", (code / "local_test.py").read_text())
+        self.assertEqual((self.local / "local_test.py").read_text(), 'VALUE = "known-private-value"\n')
+        self.assertFalse((code / ".env").exists())
+        self.assertFalse((code / "helper.session").exists())
+        self.assertFalse((code / ".git").exists())
+
+    async def test_failed_snapshot_stops_before_install_and_merge(self):
+        outside = Path(self.temp.name) / "outside"
+        outside.mkdir()
+        (self.local / "snapshots").symlink_to(outside, target_is_directory=True)
+        (self.remote / "requirements.txt").write_text("example-package==1.0\n")
+        self.commit("Dependencies")
+        plan = await self.updater.check()
+        original_run = self.updater._run
+        async def run(*command, **kwargs):
+            self.assertEqual(command[0], "git", "pip must not run before a successful snapshot")
+            return await original_run(*command, **kwargs)
+        with patch.object(self.updater, "_run", side_effect=run):
+            with self.assertRaises(UpdateError) as error:
+                await self.updater.update(self.progress, plan=plan)
+        self.assertEqual(error.exception.key, "self_update_snapshot_failed")
+        self.assertEqual(self.git(self.local, "rev-parse", "HEAD"), self.initial)
+        self.assertEqual(list(outside.iterdir()), [])
+
+    async def test_stale_plan_does_not_clone_or_apply(self):
+        (self.remote / "name.py").write_text("VERSION = 2\n")
+        self.commit("Update")
+        plan = await self.updater.check()
+        self.git(self.local, "-c", "user.name=Test", "-c", "user.email=test@example.com", "commit", "--allow-empty", "-qm", "Local change after check")
+        with self.assertRaises(UpdateError) as error:
+            await self.updater.update(self.progress, plan=plan)
+        self.assertEqual(error.exception.key, "self_update_changed")
+        self.assertFalse((self.local / "snapshots").exists())
+
+    async def test_shallow_checkout_counts_all_new_commits(self):
+        shallow = Path(self.temp.name) / "shallow"
+        self.git(self.remote, "clone", "--quiet", "--depth", "1", self.remote.as_uri(), str(shallow))
+        for version in (2, 3):
+            (self.remote / "name.py").write_text(f"VERSION = {version}\n")
+            self.commit(f"Version {version}")
+        self.assertEqual(self.git(shallow, "rev-parse", "--is-shallow-repository"), "true")
+        plan = await BotUpdater(shallow).check()
+        self.assertEqual(plan.ahead, 2)
+        self.assertEqual((shallow / "name.py").read_text(), "VERSION = 1\n")
 
     async def test_update_preserves_config_sessions_and_origin(self):
         (self.local / ".env").write_text("BOT_TOKEN=secret\n")
@@ -56,7 +159,7 @@ class BotUpdaterTests(unittest.IsolatedAsyncioTestCase):
         (self.remote / "name.py").write_text("VERSION = 2\n")
         latest = self.commit("Update")
 
-        result = await self.updater.update(self.progress)
+        result = await self.apply_update()
 
         self.assertTrue(result.updated)
         self.assertEqual(self.git(self.local, "rev-parse", "HEAD"), latest)
@@ -67,7 +170,7 @@ class BotUpdaterTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(self.git(self.local, "remote", "get-url", "origin"), str(self.remote))
         self.assertFalse(self.updater.restart_event.is_set())
         with self.assertRaises(UpdateError) as error:
-            await self.updater.update(self.progress)
+            await self.apply_update()
         self.assertEqual(error.exception.key, "self_update_busy")
         self.updater.request_restart()
         self.assertTrue(self.updater.restart_event.is_set())
@@ -77,7 +180,7 @@ class BotUpdaterTests(unittest.IsolatedAsyncioTestCase):
         self.commit("Update")
         (self.local / "name.py").write_text("LOCAL = True\n")
         with self.assertRaises(UpdateError) as error:
-            await self.updater.update(self.progress)
+            await self.apply_update()
         self.assertEqual(error.exception.key, "self_update_dirty")
         self.assertEqual((self.local / "name.py").read_text(), "LOCAL = True\n")
         self.assertEqual(self.git(self.local, "rev-parse", "HEAD"), self.initial)
@@ -92,7 +195,7 @@ class BotUpdaterTests(unittest.IsolatedAsyncioTestCase):
         (self.remote / "name.py").write_text("VERSION = 2\n")
         self.commit("Upstream update")
         with self.assertRaises(UpdateError) as error:
-            await self.updater.update(self.progress)
+            await self.apply_update()
         self.assertEqual(error.exception.key, "self_update_diverged")
         self.assertEqual(self.git(self.local, "rev-parse", "HEAD"), current)
 
@@ -100,7 +203,7 @@ class BotUpdaterTests(unittest.IsolatedAsyncioTestCase):
         (self.remote / "name.py").write_text("def broken(:\n")
         self.commit("Broken update")
         with self.assertRaises(UpdateError) as error:
-            await self.updater.update(self.progress)
+            await self.apply_update()
         self.assertEqual(error.exception.key, "self_update_invalid_source")
         self.assertEqual(self.git(self.local, "rev-parse", "HEAD"), self.initial)
         self.assertFalse(self.updater.restart_event.is_set())
@@ -110,7 +213,7 @@ class BotUpdaterTests(unittest.IsolatedAsyncioTestCase):
         (self.remote / "new.py").write_text("UPSTREAM = True\n")
         self.commit("New file")
         with self.assertRaises(UpdateError):
-            await self.updater.update(self.progress)
+            await self.apply_update()
         self.assertEqual((self.local / "new.py").read_text(), "LOCAL = True\n")
         self.assertEqual(self.git(self.local, "rev-parse", "HEAD"), self.initial)
 
@@ -122,7 +225,7 @@ class BotUpdaterTests(unittest.IsolatedAsyncioTestCase):
         self.git(self.remote, "add", "-f", ".venv/config.txt")
         self.commit("Ignored collision")
         with self.assertRaises(UpdateError):
-            await self.updater.update(self.progress)
+            await self.apply_update()
         self.assertEqual((self.local / ".venv" / "config.txt").read_text(), "local environment")
 
     async def test_upstream_cannot_replace_credentials(self):
@@ -130,7 +233,7 @@ class BotUpdaterTests(unittest.IsolatedAsyncioTestCase):
         self.git(self.remote, "add", "-f", ".env")
         self.commit("Unsafe update")
         with self.assertRaises(UpdateError) as error:
-            await self.updater.update(self.progress)
+            await self.apply_update()
         self.assertEqual(error.exception.key, "self_update_unsafe_file")
         self.assertFalse((self.local / ".env").exists())
 
@@ -144,11 +247,12 @@ class BotUpdaterTests(unittest.IsolatedAsyncioTestCase):
             if command[0] != "git":
                 pip_calls.append(command)
                 self.assertEqual(self.git(self.local, "rev-parse", "HEAD"), self.initial)
+                self.assertTrue(list((self.local / "snapshots").glob("*/snapshot.json")))
                 return subprocess.CompletedProcess(command, 0, stdout="Installed")
             return await original_run(*command, **kwargs)
 
         with patch.object(self.updater, "_run", side_effect=run):
-            await self.updater.update(self.progress)
+            await self.apply_update()
         self.assertEqual(len(pip_calls), 1)
         self.assertEqual(pip_calls[0][:4], (bot_updater.sys.executable, "-m", "pip", "install"))
         self.assertEqual(self.git(self.local, "rev-parse", "HEAD"), latest)
@@ -158,7 +262,7 @@ class BotUpdaterTests(unittest.IsolatedAsyncioTestCase):
         self.git(self.remote, "add", "-f", "name.txt")
         self.commit("Unsafe random names")
         with self.assertRaises(UpdateError) as error:
-            await self.updater.update(self.progress)
+            await self.apply_update()
         self.assertEqual(error.exception.key, "self_update_unsafe_file")
         self.assertFalse((self.local / "name.txt").exists())
 
@@ -174,14 +278,14 @@ class BotUpdaterTests(unittest.IsolatedAsyncioTestCase):
 
         with patch.object(self.updater, "_run", side_effect=run):
             with self.assertRaises(UpdateError):
-                await self.updater.update(self.progress)
+                await self.apply_update()
         self.assertEqual(self.git(self.local, "rev-parse", "HEAD"), self.initial)
         self.assertFalse(self.updater._restart_pending)
 
     async def test_not_git_checkout_is_rejected(self):
         updater = BotUpdater(self.temp.name)
         with self.assertRaises(UpdateError) as error:
-            await updater.update(self.progress)
+            await updater.check()
         self.assertEqual(error.exception.key, "self_update_not_git")
         self.assertEqual(error.exception.details["directory"], str(Path(self.temp.name).resolve()))
 
@@ -195,7 +299,7 @@ class BotUpdaterTests(unittest.IsolatedAsyncioTestCase):
             "GIT_TRACE": "1",
         }
         with patch.dict(os.environ, environment):
-            result = await self.updater.update(self.progress)
+            result = await self.apply_update()
         self.assertTrue(result.updated)
         self.assertEqual(self.git(self.local, "rev-parse", "HEAD"), latest)
         self.assertEqual((self.local / "name.py").read_text(), "VERSION = 2\n")
@@ -232,7 +336,7 @@ class BotUpdaterTests(unittest.IsolatedAsyncioTestCase):
         )
         with patch.object(self.updater, "_git", new=AsyncMock(return_value=result)) as git:
             with self.assertRaises(UpdateError) as error:
-                await self.updater.update(self.progress)
+                await self.updater.check()
         self.assertEqual(error.exception.key, "self_update_git_ownership")
         self.assertEqual(error.exception.details["directory"], str(self.local.resolve()))
         git.assert_awaited_once_with("rev-parse", "--show-toplevel", allowed_codes=(0, 128))
@@ -241,7 +345,7 @@ class BotUpdaterTests(unittest.IsolatedAsyncioTestCase):
         result = subprocess.CompletedProcess(("git",), 128, stdout="", stderr="fatal: permission denied")
         with patch.object(self.updater, "_git", new=AsyncMock(return_value=result)):
             with self.assertRaises(UpdateError) as error:
-                await self.updater.update(self.progress)
+                await self.updater.check()
         self.assertEqual(error.exception.key, "self_update_command_failed")
         self.assertIn("permission denied", error.exception.details["details"])
 
@@ -250,7 +354,7 @@ class BotUpdaterTests(unittest.IsolatedAsyncioTestCase):
         nested.mkdir()
         updater = BotUpdater(nested)
         with self.assertRaises(UpdateError) as error:
-            await updater.update(self.progress)
+            await updater.check()
         self.assertEqual(error.exception.key, "self_update_wrong_directory")
         self.assertEqual(error.exception.details["root"], str(self.local.resolve()))
         self.assertEqual(error.exception.details["directory"], str(nested.resolve()))
@@ -262,7 +366,8 @@ class BotUpdaterTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue((linked / ".git").is_file())
         (self.remote / "name.py").write_text("VERSION = 2\n")
         latest = self.commit("Worktree update")
-        result = await BotUpdater(linked).update(self.progress)
+        updater = BotUpdater(linked)
+        result = await updater.update(self.progress, plan=await updater.check())
         self.assertTrue(result.updated)
         self.assertEqual(self.git(linked, "rev-parse", "HEAD"), latest)
         self.assertEqual(self.git(self.local, "rev-parse", "HEAD"), self.initial)
@@ -270,7 +375,8 @@ class BotUpdaterTests(unittest.IsolatedAsyncioTestCase):
     async def test_symlinked_checkout_is_supported(self):
         linked = Path(self.temp.name) / "linked-bot"
         linked.symlink_to(self.local, target_is_directory=True)
-        result = await BotUpdater(linked).update(self.progress)
+        updater = BotUpdater(linked)
+        result = await updater.update(self.progress, plan=await updater.check())
         self.assertFalse(result.updated)
 
     async def test_successful_subprocess_keeps_stdout_and_stderr_separate(self):
@@ -283,13 +389,13 @@ class BotUpdaterTests(unittest.IsolatedAsyncioTestCase):
     async def test_missing_git_is_reported(self):
         with patch("bot_updater.shutil.which", return_value=None):
             with self.assertRaises(UpdateError) as error:
-                await self.updater.update(self.progress)
+                await self.apply_update()
         self.assertEqual(error.exception.key, "self_update_missing_git")
 
     async def test_concurrent_update_is_rejected(self):
         async with self.updater._lock:
             with self.assertRaises(UpdateError) as error:
-                await self.updater.update(self.progress)
+                await self.apply_update()
         self.assertEqual(error.exception.key, "self_update_busy")
 
     async def test_source_changed_during_download_is_not_overwritten(self):
@@ -301,19 +407,19 @@ class BotUpdaterTests(unittest.IsolatedAsyncioTestCase):
                 (self.local / "name.py").write_text("LOCAL = True\n")
 
         with self.assertRaises(UpdateError) as error:
-            await self.updater.update(progress)
+            await self.apply_update(progress)
         self.assertEqual(error.exception.key, "self_update_dirty")
         self.assertEqual((self.local / "name.py").read_text(), "LOCAL = True\n")
 
     async def test_failed_network_does_not_restart(self):
         with patch.object(bot_updater, "REPO_URL", str(self.remote / "missing")):
             with self.assertRaises(UpdateError) as error:
-                await self.updater.update(self.progress)
+                await self.apply_update()
         self.assertEqual(error.exception.key, "self_update_command_failed")
         self.assertEqual(self.git(self.local, "rev-parse", "HEAD"), self.initial)
         self.assertFalse(self.updater.restart_event.is_set())
         # Khóa được nhả để có thể thử lại sau lỗi.
-        self.assertFalse((await self.updater.update(self.progress)).updated)
+        self.assertFalse((await self.apply_update()).updated)
 
     async def test_subprocess_timeout_is_reported(self):
         with self.assertRaises(UpdateError) as error:

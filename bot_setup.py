@@ -9,7 +9,7 @@ from telethon import TelegramClient
 from telethon.sessions import StringSession
 
 from updater_state import state
-from bot_updater import bot_updater, run_update_check
+from bot_updater import bot_updater, run_update_check, run_update_action, update_requests
 from reset_control import reset_requests, reset_notice, reset_buttons, apply_config_reset, cleanup_reset_sessions
 from i18n import get_text
 from shell_commands import shell_runner, run_shell_message, config_secrets
@@ -160,7 +160,13 @@ class BotAPISetup:
                 print(f"[ℹ️] Bot API {exc.diagnostic()}")
                 return False
             data = callback.get("data", "")
-            if data == "updatecheck":
+            if data.startswith(("update_confirm:", "update_cancel:")):
+                action, token = data.split(":", 1)
+                await run_update_action(
+                    self.update_edit, self.admin_id, token, state.config.get("LANGUAGE", "vi"), updater=bot_updater,
+                    confirm=action == "update_confirm", secret_values=[*config_secrets(state.config), state.config.get("API_ID", "")],
+                )
+            elif data == "updatecheck":
                 await self.check_update()
             elif data == "reset_request":
                 await self.offer_reset()
@@ -190,6 +196,7 @@ class BotAPISetup:
                 self.api_id = ""
                 await self.send(self.text("🆔 Gửi <b>API_ID</b> của bạn (số dương):", "🆔 Send your <b>API_ID</b> (a positive number):"), self.cancel_keyboard())
             elif data in ("main_menu", "bootstrap_cancel", "bootstrap_vi", "bootstrap_en"):
+                update_requests.cancel(self.admin_id)
                 self.action = None
                 self.api_id = ""
                 if data in ("bootstrap_vi", "bootstrap_en"):
@@ -228,6 +235,7 @@ class BotAPISetup:
             await self.offer_reset()
             return False
         if command in ("/start", "/home", "/setup", "/cancel"):
+            update_requests.cancel(self.admin_id)
             self.action = None
             self.api_id = ""
             await self.show_menu()
@@ -287,9 +295,10 @@ class BotAPISetup:
     async def check_update(self):
         lang = state.config.get("LANGUAGE", "vi")
         await self.send(get_text("self_update_checking", lang))
-        async def edit(text, parse_mode="html"):
-            await self.send(text)
-        await run_update_check(edit, lang, updater=bot_updater)
+        await run_update_check(self.update_edit, lang, updater=bot_updater, owner_id=self.admin_id)
+
+    async def update_edit(self, text, parse_mode="html", buttons=None):
+        await self.send(text, keyboard=buttons)
 
 
 async def run_api_setup(token, admin_id):

@@ -22,7 +22,7 @@ class RepositoryHygieneTests(unittest.TestCase):
             self.assertEqual(value.strip(), "", key)
 
     def test_runtime_files_and_env_backups_are_ignored(self):
-        paths = [".env", ".env.backup", ".env.production", "name.txt", "bot.session", "bot.session-wal", ".venv/pyvenv.cfg", "__pycache__/cache.pyc"]
+        paths = [".env", ".env.backup", ".env.production", "name.txt", "bot.session", "bot.session-wal", ".venv/pyvenv.cfg", "__pycache__/cache.pyc", "snapshots/example/code/name.py"]
         result = subprocess.run(["git", "check-ignore", "--stdin"], cwd=ROOT, input="\n".join(paths), text=True, capture_output=True)
         self.assertEqual(set(result.stdout.splitlines()), set(paths))
         result = subprocess.run(["git", "check-ignore", "--no-index", ".env.example"], cwd=ROOT, capture_output=True)

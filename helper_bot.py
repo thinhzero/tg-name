@@ -35,7 +35,7 @@ from telethon.errors import (
 from updater_state import state, DEFAULT_NAME_FORMAT
 from profile_engine import engine, generate_preview, get_lastfm_track
 from i18n import get_text
-from bot_updater import bot_updater, run_with_restart, run_update_check
+from bot_updater import bot_updater, run_with_restart, run_update_check, run_update_action, update_requests
 from random_names import random_names
 from bot_setup import run_api_setup
 from reset_control import reset_requests, reset_notice, reset_buttons, apply_config_reset, cleanup_reset_sessions
@@ -52,6 +52,7 @@ def get_home_keyboard():
 
 
 async def cancel_user_dialog(user_id):
+    update_requests.cancel(user_id)
     sess = user_sessions.pop(user_id, None)
     if sess and "temp_client" in sess:
         try:
@@ -496,13 +497,37 @@ def format_bio_preview_card(lang: str = None):
 # BỘ XỬ LÝ LỆNH USERBOT (SELF-COMMANDS)
 # ============================================================
 
-async def handle_updatecheck(message):
-    """Dùng chung cho .updatecheck của chủ tài khoản và /updatecheck của admin."""
+def update_editor(message, userbot=False):
+    async def edit(text, parse_mode="html", buttons=None):
+        kwargs = {"parse_mode": parse_mode}
+        if buttons is not None and not userbot:
+            kwargs["buttons"] = [[Button.inline(item["text"], data=item["callback_data"]) for item in row] for row in buttons]
+        await message.edit(text, **kwargs)
+    return edit
+
+
+def update_owner(message, userbot=False):
+    owner = getattr(message, "sender_id", None) if userbot else None
+    return int(owner or state.config.get("ADMIN_ID") or state.account_id or 0)
+
+
+async def handle_updatecheck(message, userbot=False):
+    """Kiểm tra và hỏi trước; chưa clone/cài/cập nhật mã nguồn."""
     lang = state.config.get("LANGUAGE", "vi")
     if state.is_resetting:
         return
 
-    await run_update_check(message.edit, lang, updater=bot_updater)
+    await run_update_check(update_editor(message, userbot), lang, updater=bot_updater, owner_id=update_owner(message, userbot), userbot=userbot)
+
+
+async def handle_update_action(message, token, confirm=True, userbot=False):
+    if state.is_resetting:
+        return
+    await run_update_action(
+        update_editor(message, userbot), update_owner(message, userbot), token, state.config.get("LANGUAGE", "vi"),
+        updater=bot_updater, confirm=confirm, userbot=userbot,
+        secret_values=[*config_secrets(state.config), state.config.get("API_ID", "")],
+    )
 
 
 def format_random_entries(title, entries):
@@ -590,7 +615,7 @@ def format_help(lang="vi", helper=False):
             f"• <code>{p}rmrandom UID</code>: use the code from the list, not a Telegram user ID.\n\n"
             f"<b>3. Controls</b>\n"
             f"• <code>{p}update</code>: update name/bio now.\n"
-            f"• <code>{p}updatecheck</code>: update CODE from GitHub and restart.\n"
+            f"• <code>{p}updatecheck</code>: compare GitHub commits; asks before updating CODE.\n"
             f"• <code>{p}status</code>, <code>{p}pause</code>, <code>{p}resume</code>\n"
             f"• <code>{p}afk [reason]</code>, <code>{p}on</code>: away / back online.\n"
             f"• <code>{p}ping [host]</code>: Telegram latency + uptime; optional system ping.\n"
@@ -614,7 +639,7 @@ def format_help(lang="vi", helper=False):
         f"• <code>{p}rmrandom UID</code>: lấy mã mục trong danh sách, không phải ID tài khoản.\n\n"
         f"<b>3. Điều khiển</b>\n"
         f"• <code>{p}update</code>: đổi tên/bio ngay.\n"
-        f"• <code>{p}updatecheck</code>: cập nhật CODE từ GitHub rồi restart.\n"
+        f"• <code>{p}updatecheck</code>: đếm commit GitHub; hỏi trước khi cập nhật CODE.\n"
         f"• <code>{p}status</code>, <code>{p}pause</code>, <code>{p}resume</code>\n"
         f"• <code>{p}afk [lý do]</code>, <code>{p}on</code>: bật / tắt vắng mặt.\n"
         f"• <code>{p}ping [host]</code>: độ trễ Telegram + uptime; có host thì ping hệ thống.\n"
@@ -631,7 +656,7 @@ def format_help(lang="vi", helper=False):
 
 def register_userbot_handlers(client: TelegramClient):
     """Đăng ký các lệnh tự điều khiển trên Userbot (.status, .name, .update, ...)"""
-    @client.on(events.NewMessage(outgoing=True, pattern=r"^\.(help|status|update|updatecheck|updaterandom|lsrandom|rmrandom|afk|on|ping|name|setname|basename|city|pause|resume|nameformat|setnameformat|bioformat|setbio|lastfm|music|bio|previewbio|preview|weather|lang)(?:\s+([\s\S]+))?$"))
+    @client.on(events.NewMessage(outgoing=True, pattern=r"^\.(help|status|update|updatecheck|updateconfirm|updatecancel|updaterandom|lsrandom|rmrandom|afk|on|ping|name|setname|basename|city|pause|resume|nameformat|setnameformat|bioformat|setbio|lastfm|music|bio|previewbio|preview|weather|lang)(?:\s+([\s\S]+))?$"))
     async def userbot_command_handler(event):
         cmd = event.pattern_match.group(1).lower()
         arg = (event.pattern_match.group(2) or "").strip()
@@ -674,7 +699,10 @@ def register_userbot_handlers(client: TelegramClient):
 
         elif cmd == "updatecheck":
             await event.edit(get_text("self_update_checking", cur_lang), parse_mode="html")
-            await handle_updatecheck(event)
+            await handle_updatecheck(event, userbot=True)
+
+        elif cmd in ("updateconfirm", "updatecancel"):
+            await handle_update_action(event, arg, confirm=cmd == "updateconfirm", userbot=True)
 
         elif cmd in ("updaterandom", "lsrandom", "rmrandom"):
             await handle_random_command(event, cmd, arg, cur_lang)
@@ -1504,6 +1532,12 @@ def register_bot_handlers(bot_client: TelegramClient):
 
         data = event.data.decode("utf-8")
         lang = state.config.get("LANGUAGE", "vi")
+        if data.startswith(("update_confirm:", "update_cancel:")):
+            if not event.is_private or state.is_resetting: return
+            await event.answer()
+            action, token = data.split(":", 1)
+            await handle_update_action(event, token, confirm=action == "update_confirm")
+            return
         if data.startswith("panel_page:"):
             page = data.split(":", 1)[1]
             pages = event.panel.get("pages", [])

@@ -230,7 +230,7 @@ Helper Bot chỉ nhận lệnh trong **chat riêng**, từ `ADMIN_ID` đã cấu
 | Đặt Last.fm username | `.lastfm username` | `/lastfm username` |
 | Xem nhạc | `.music` | `/music` |
 | Đổi ngôn ngữ | `.lang vi` / `.lang en` | `/lang vi` / `/lang en` |
-| Cập nhật code và restart | `.updatecheck` | `/updatecheck` |
+| Kiểm tra code, hỏi trước khi cập nhật | `.updatecheck` | `/updatecheck` |
 | Chạy lệnh Linux | — | `/shell uptime` hoặc `/shell lệnh` (chỉ admin) |
 
 Trên Helper Bot, `/cancel` hủy thao tác nhập đang dang dở. Đăng nhập qua terminal được
@@ -271,7 +271,8 @@ vẫn được cố xóa riêng; kết quả tác vụ cũ không ghi đè màn 
 ### Nút cập nhật và lệnh Linux / Termux
 
 Bấm **🔎 Kiểm tra cập nhật** ở menu chính hoặc **Cài đặt**: hành vi giống `/updatecheck`.
-Có bản mới thì tải, cập nhật an toàn và tự restart; đã mới nhất thì chỉ báo commit hiện tại.
+Có bản mới thì báo **số commit mới hơn** và hỏi **✅ Có, cập nhật / ❌ Không**. Chưa bấm Có
+thì không clone, cài thư viện, tạo snapshot hay thay code; đã mới nhất thì chỉ báo commit.
 Nút này và `/updatecheck` cũng có ở màn hình khởi tạo khi chưa nhập API.
 
 Trên Linux hoặc Termux, admin nhắn riêng với bot:
@@ -382,10 +383,29 @@ pm2 save
 - Khởi động lại sau khi sửa cấu hình: `pm2 restart tg-name`.
 - Dừng: `pm2 stop tg-name`.
 
-Gửi `.updatecheck` trên Userbot hoặc `/updatecheck` cho Helper Bot để cập nhật code.
-Bot kiểm tra nhánh **main** của https://github.com/thinhzero/tg-name. Nếu có bản mới,
-bot clone tạm, kiểm tra cú pháp Python, cài thư viện nếu `requirements.txt` thay đổi,
-cập nhật fast-forward rồi tự restart. Không có bản mới thì không restart.
+Gửi `.updatecheck` trên Userbot hoặc `/updatecheck` cho Helper Bot để **kiểm tra trước**.
+Bot so sánh với nhánh **main** của https://github.com/thinhzero/tg-name, fetch lịch sử Git
+để đếm chính xác số commit nhưng **không clone/checkout, cài thư viện hay đổi code** ở bước này.
+
+- Có bản mới: hiện số commit và commit đích, hỏi **✅ Có, cập nhật / ❌ Không** trong cùng panel.
+- Chọn **Không**, về Home hoặc không xác nhận: không áp dụng cập nhật. Xác nhận hết hạn sau 5 phút,
+  dùng một lần, gắn với admin và bản bot nhận yêu cầu; không khóa/chặn các bản bot khác đang test.
+- Chỉ sau khi chọn **Có**: clone tạm, kiểm tra mã Python, tạo snapshot code hiện tại, cài thư viện
+  nếu cần, cập nhật fast-forward **đúng commit đã xác nhận**, rồi tự restart bản đang xử lý.
+- Trên Userbot (không gửi được nút inline), tin kết quả có lệnh `.updateconfirm TOKEN` và
+  `.updatecancel TOKEN`; dùng đúng mã bot trả về, không phải token đăng nhập Telegram/GitHub.
+
+Snapshot nằm tại **`snapshots/<thời-gian-UTC>-<commit-cũ>-<mã>/`** trong thư mục bot:
+
+- `code/` chứa các file source/text được Git theo dõi và source mới chưa commit, không lấy file bị ignore.
+- `snapshot.json` ghi commit trước/sau, danh sách file và file đã che/bỏ qua; không chứa giá trị key.
+- Không sao chép `.git`, `.env` thật/bản sao, session, khóa riêng, database, archive/binary, virtualenv,
+  cache, log, `name.txt` cá nhân hay các snapshot cũ. Các literal token/API/session trong source
+  được nhận diện và key đã biết được che; snapshot không phải bản sao cấu hình/đăng nhập.
+- Snapshot được tạo **trước khi cài thư viện/thay code**, vẫn còn sau cập nhật hoặc nếu bước sau lỗi.
+  Không tạo được snapshot thì dừng. Thư mục này được Git ignore, không tự push hay tự xóa bản cũ.
+- Khi phục hồi thủ công, chỉ lấy source cần thiết từ `code/`, giữ `.env`/session hiện tại; xem trường
+  `redacted` trong `snapshot.json` nếu source cũ có literal khóa cần nhập lại.
 
 `.env`, `name.txt`, session và remote `origin` được giữ nguyên. Nếu code đã sửa cục bộ,
 có commit riêng hoặc file mới trùng file của bạn, bot dừng cập nhật thay vì ghi đè.

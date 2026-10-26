@@ -126,6 +126,38 @@ TEXTS: Dict[str, Dict[str, str]] = {
         "vi": "🔎 <b>Đang kiểm tra bản bot mới trên GitHub...</b>",
         "en": "🔎 <b>Checking GitHub for bot updates...</b>"
     },
+    "self_update_offer": {
+        "vi": "🔎 <b>Có {count} commit mới hơn trên GitHub.</b>\n<code>{old}</code> → <code>{new}</code>\n\nChưa clone, cài thư viện hay thay code. Chọn <b>Có</b> để tạo snapshot code (không chứa .env/token/API/session), cập nhật đúng commit này rồi restart. Chọn <b>Không</b> để giữ nguyên.\nXác nhận có hiệu lực 5 phút.",
+        "en": "🔎 <b>GitHub is {count} commits ahead.</b>\n<code>{old}</code> → <code>{new}</code>\n\nNo clone, dependency installation or code change yet. Choose <b>Yes</b> to snapshot the code (excluding .env/tokens/API credentials/sessions), apply this commit and restart. Choose <b>No</b> to keep the current code.\nConfirmation expires in 5 minutes."
+    },
+    "self_update_text_confirm": {
+        "vi": "\n\nXác nhận: <code>.updateconfirm {token}</code>\nBỏ qua: <code>.updatecancel {token}</code>",
+        "en": "\n\nConfirm: <code>.updateconfirm {token}</code>\nDecline: <code>.updatecancel {token}</code>"
+    },
+    "self_update_compare_diverged": {
+        "vi": "⚠️ GitHub có <b>{ahead}</b> commit chưa có ở máy này; máy này có <b>{local}</b> commit riêng. Chưa đổi code. Không cập nhật fast-forward được; hãy xử lý nhánh test/commit riêng thủ công.",
+        "en": "⚠️ GitHub has <b>{ahead}</b> commits missing locally; this checkout has <b>{local}</b> local-only commits. Code is unchanged. Resolve the test branch/local commits before a fast-forward update."
+    },
+    "self_update_cancelled": {
+        "vi": "✅ Đã chọn không cập nhật. Giữ nguyên code; không tạo snapshot, cài thư viện hay restart.",
+        "en": "✅ Update declined. Code is unchanged; no snapshot, dependency installation or restart."
+    },
+    "self_update_expired": {
+        "vi": "⚠️ Xác nhận đã hết hạn, đã dùng hoặc thuộc lần chạy khác. Gửi /updatecheck (Userbot: .updatecheck) để kiểm tra lại.",
+        "en": "⚠️ Confirmation expired, was already used or belongs to another run. Check again with /updatecheck (Userbot: .updatecheck)."
+    },
+    "self_update_confirmation_required": {
+        "vi": "⚠️ Cần kiểm tra và xác nhận Có trước khi cập nhật.",
+        "en": "⚠️ Check and explicitly confirm Yes before updating."
+    },
+    "self_update_snapshot": {
+        "vi": "📸 <b>Đang tạo snapshot code hiện tại, loại bỏ cấu hình/khóa/phiên đăng nhập...</b>",
+        "en": "📸 <b>Snapshotting current source, excluding configuration credentials and sessions...</b>"
+    },
+    "self_update_snapshot_failed": {
+        "vi": "❌ Không tạo được snapshot ({details}); đã dừng trước khi cài thư viện/thay code.",
+        "en": "❌ Snapshot failed ({details}); stopped before installing dependencies or changing code."
+    },
     "self_update_downloading": {
         "vi": "📥 <b>Có bản mới! Đang clone thinhzero/tg-name (main)...</b>",
         "en": "📥 <b>Update found! Cloning thinhzero/tg-name (main)...</b>"
@@ -143,8 +175,8 @@ TEXTS: Dict[str, Dict[str, str]] = {
         "en": "✅ <b>The bot is already up to date.</b> Commit: <code>{commit}</code>"
     },
     "self_update_restarting": {
-        "vi": "✅ <b>Đã cập nhật bot:</b> <code>{old}</code> → <code>{new}</code>\n🔄 Đang khởi động lại bot...",
-        "en": "✅ <b>Bot updated:</b> <code>{old}</code> → <code>{new}</code>\n🔄 Restarting the bot..."
+        "vi": "✅ <b>Đã cập nhật bot:</b> <code>{old}</code> → <code>{new}</code>\n📸 Snapshot: <code>{snapshot}</code>\n🔄 Đang khởi động lại bot...",
+        "en": "✅ <b>Bot updated:</b> <code>{old}</code> → <code>{new}</code>\n📸 Snapshot: <code>{snapshot}</code>\n🔄 Restarting the bot..."
     },
     "self_update_busy": {
         "vi": "⏳ Bot đang cập nhật hoặc chuẩn bị khởi động lại. Vui lòng chờ.",

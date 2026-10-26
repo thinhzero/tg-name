@@ -7,7 +7,7 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, Mock, patch
 
-from bot_updater import UpdateError, UpdateResult
+from bot_updater import UpdateError, UpdateResult, UpdatePlan, update_requests
 from random_names import RandomNames
 
 
@@ -30,38 +30,48 @@ class UpdatecheckHandlerTests(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self):
         import helper_bot
         self.helper = helper_bot
-        self.updater = SimpleNamespace(update=AsyncMock(), request_restart=Mock())
+        self.updater = SimpleNamespace(check=AsyncMock(), update=AsyncMock(), request_restart=Mock())
         updater_patch = patch.object(helper_bot, "bot_updater", self.updater)
         updater_patch.start()
         self.addCleanup(updater_patch.stop)
         config_patch = patch.dict(helper_bot.state.config, {"LANGUAGE": "vi", "ADMIN_ID": "42"})
         config_patch.start()
         self.addCleanup(config_patch.stop)
+        requests_patch = patch.dict(update_requests.pending, {}, clear=True)
+        requests_patch.start()
+        self.addCleanup(requests_patch.stop)
         self.message = SimpleNamespace(edit=AsyncMock())
 
     async def test_latest_version_does_not_restart(self):
-        self.updater.update.return_value = UpdateResult("abcdef123", "abcdef123")
+        self.updater.check.return_value = UpdatePlan("abcdef123", "abcdef123")
         await self.helper.handle_updatecheck(self.message)
         self.assertIn("mới nhất", self.message.edit.call_args.args[0])
         self.updater.request_restart.assert_not_called()
 
     async def test_success_notifies_then_restarts(self):
+        self.updater.check.return_value = UpdatePlan("abcdef123", "123456789", ahead=3)
         self.updater.update.return_value = UpdateResult("abcdef123", "123456789", updated=True)
-        self.updater.request_restart.side_effect = lambda: self.message.edit.assert_awaited_once()
         await self.helper.handle_updatecheck(self.message)
+        self.updater.update.assert_not_awaited()
+        self.assertIn("3", self.message.edit.call_args.args[0])
+        token = update_requests.pending[(42, False)][0]
+        self.message.edit.reset_mock()
+        self.updater.request_restart.side_effect = lambda: self.message.edit.assert_awaited_once()
+        await self.helper.handle_update_action(self.message, token)
         self.assertIn("abcdef1", self.message.edit.call_args.args[0])
         self.assertIn("1234567", self.message.edit.call_args.args[0])
         self.updater.request_restart.assert_called_once()
 
     async def test_success_still_restarts_if_notification_fails(self):
         self.updater.update.return_value = UpdateResult("old", "new", updated=True)
+        token = update_requests.create(42, UpdatePlan("old", "new", ahead=1))
         self.message.edit.side_effect = RuntimeError("Telegram disconnected")
         with self.assertRaises(RuntimeError):
-            await self.helper.handle_updatecheck(self.message)
+            await self.helper.handle_update_action(self.message, token)
         self.updater.request_restart.assert_called_once()
 
     async def test_update_error_is_escaped_and_does_not_restart(self):
-        self.updater.update.side_effect = UpdateError("self_update_command_failed", details="<failure>&")
+        self.updater.check.side_effect = UpdateError("self_update_command_failed", details="<failure>&")
         await self.helper.handle_updatecheck(self.message)
         self.assertIn("&lt;failure&gt;&amp;", self.message.edit.call_args.args[0])
         self.updater.request_restart.assert_not_called()
@@ -69,7 +79,7 @@ class UpdatecheckHandlerTests(unittest.IsolatedAsyncioTestCase):
     async def test_checkout_errors_show_safe_directory_details(self):
         for key in ("self_update_not_git", "self_update_git_ownership", "self_update_wrong_directory"):
             with self.subTest(key=key):
-                self.updater.update.side_effect = UpdateError(key, directory="<bot>&", root="<parent>&")
+                self.updater.check.side_effect = UpdateError(key, directory="<bot>&", root="<parent>&")
                 await self.helper.handle_updatecheck(self.message)
                 text = self.message.edit.call_args.args[0]
                 self.assertIn("&lt;bot&gt;&amp;", text)
@@ -79,13 +89,17 @@ class UpdatecheckHandlerTests(unittest.IsolatedAsyncioTestCase):
         self.updater.request_restart.assert_not_called()
 
     async def test_progress_uses_selected_language(self):
-        async def update(progress):
+        async def update(progress, **kwargs):
             await progress("self_update_downloading")
             return UpdateResult("old", "new", updated=True)
 
         self.helper.state.config["LANGUAGE"] = "en"
+        self.updater.check.return_value = UpdatePlan("old", "new", ahead=1)
         self.updater.update.side_effect = update
         await self.helper.handle_updatecheck(self.message)
+        token = update_requests.pending[(42, False)][0]
+        self.message.edit.reset_mock()
+        await self.helper.handle_update_action(self.message, token)
         self.assertIn("Cloning", self.message.edit.call_args_list[0].args[0])
         self.assertIn("Restarting", self.message.edit.call_args_list[1].args[0])
 
@@ -97,9 +111,25 @@ class UpdatecheckHandlerTests(unittest.IsolatedAsyncioTestCase):
         match = builder.pattern(".updatecheck")
         self.assertIsNotNone(match)
         event = SimpleNamespace(pattern_match=match, edit=AsyncMock())
-        self.updater.update.return_value = UpdateResult("old", "old")
+        self.updater.check.return_value = UpdatePlan("old", "old")
+        await handler(event)
+        self.updater.check.assert_awaited_once()
+
+    async def test_userbot_text_confirmation_is_explicit_and_owner_bound(self):
+        client = HandlerClient()
+        self.helper.register_userbot_handlers(client)
+        handler, builder = client.handlers["userbot_command_handler"]
+        self.updater.check.return_value = UpdatePlan("old", "new", ahead=2)
+        event = SimpleNamespace(sender_id=42, pattern_match=builder.pattern(".updatecheck"), edit=AsyncMock())
+        await handler(event)
+        self.updater.update.assert_not_awaited()
+        token = update_requests.pending[(42, True)][0]
+        self.assertIn(".updateconfirm " + token, event.edit.call_args.args[0])
+        self.updater.update.return_value = UpdateResult("old", "new", updated=True, snapshot="snapshots/example")
+        event.pattern_match = builder.pattern(".updateconfirm " + token)
         await handler(event)
         self.updater.update.assert_awaited_once()
+        self.updater.request_restart.assert_called_once()
 
     async def test_profile_update_keeps_its_original_behavior(self):
         client = HandlerClient()
@@ -126,9 +156,9 @@ class UpdatecheckHandlerTests(unittest.IsolatedAsyncioTestCase):
         handler, builder = client.handlers["updatecheck_cmd"]
         self.assertIsNotNone(builder.pattern("/updatecheck@MyHelperBot"))
         event = SimpleNamespace(sender_id=42, reply=AsyncMock(return_value=self.message))
-        self.updater.update.return_value = UpdateResult("old", "old")
+        self.updater.check.return_value = UpdatePlan("old", "old")
         await handler(event)
-        self.updater.update.assert_awaited_once()
+        self.updater.check.assert_awaited_once()
 
 
 @unittest.skipUnless(HAS_DEPENDENCIES, "Cài requirements.txt để kiểm thử handler Telegram")
