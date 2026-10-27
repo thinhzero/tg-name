@@ -533,6 +533,8 @@ class ProfileEngine:
     async def stop(self):
         """Dừng tiến trình cập nhật profile"""
         from presence import presence
+        from file_transfer import file_transfers
+        await file_transfers.close(userbot=True)
         await presence.close()
         if not self.is_running:
             return True, "Tiến trình chưa chạy."

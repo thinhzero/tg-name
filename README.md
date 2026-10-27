@@ -219,6 +219,10 @@ Helper Bot chỉ nhận lệnh trong **chat riêng**, từ `ADMIN_ID` đã cấu
 | Tạm dừng / tiếp tục | `.pause` / `.resume` | `/pause` / `/resume` |
 | Vắng mặt / trở lại | `.afk [thời gian] [lý do]` / `.on` | `/afk [thời gian] [lý do]` / `/on` |
 | Ping và uptime | `.ping [host]` | `/ping [host]` |
+| Tra IP công khai | `.ip 1.1.1.1` | `/ip 1.1.1.1` |
+| Tra đăng ký tên miền | `.whois example.com` | `/whois example.com` |
+| Tải link file → Telegram | `.l URL` | `/l URL` |
+| Hủy tác vụ tải/gửi file | `.cancel` | `/cancel` (đồng thời hủy bước nhập) |
 | Về Home nhanh | — | `/home` hoặc nút **🏠 Home** |
 | Đổi tên cố định | `.name tên mới` | `/setname tên mới` |
 | Đổi mẫu tên | `.nameformat mẫu` | `/nameformat mẫu` |
@@ -264,6 +268,40 @@ AFK chỉ lưu trong lần chạy hiện tại, không tự thay tên/bio hay t�
 Thêm hostname/IP để chạy một gói ping hệ thống (timeout 5 giây), không dùng raw socket hay
 thư viện `ping3`. Trên Termux, nếu chưa có lệnh ping: `pkg install iputils`.
 Helper Bot nhận `/afk`, `/on`, `/ping` từ admin; bật AFK cần Userbot đang chạy.
+
+### Tra IP/tên miền và tải link file
+
+Đây là nhóm tiện ích được chọn lọc từ source `sth` cũ và viết lại; không mang theo config,
+session, token, cookie hay thư mục downloads cũ. Xem [ghi chú chuyển đổi](docs/legacy-port.md).
+
+```text
+.ip 1.1.1.1
+.ip 2606:4700:4700::1111
+.whois example.com
+.l https://example.com/file.zip
+.cancel
+```
+
+- `.ip` nhận IPv4/IPv6 **công khai**, tra qua HTTPS tại `ipwho.is`; vị trí chỉ là ước lượng.
+  Không nhập IP thì chỉ hiện hướng dẫn, không vô tình công khai IP máy chạy bot.
+- `.whois` dùng **RDAP qua rdap.org**, không scrape trang WHOIS cũ. Có ngày đăng ký/hết hạn,
+  nhà đăng ký, nameserver và trạng thái nếu registry cung cấp; không hiện liên hệ cá nhân.
+  Không phải mọi đuôi tên miền đều có dữ liệu RDAP. Mỗi tra cứu có timeout 15 giây.
+- `.l URL` tải **link file trực tiếp** rồi gửi lên Telegram dưới dạng tài liệu. Có thể reply tin
+  chứa link và gửi `.l`. Đây không phải trình trích xuất YouTube, trang chia sẻ hay playlist.
+  Mỗi lúc chỉ một tác vụ tải/gửi cho cả Userbot và Helper Bot; tối đa **100 MiB, 5 phút**.
+- Progress có tốc độ, dung lượng và ETA, sửa cùng tin trạng thái thay vì gửi hàng loạt tin mới.
+  `.cancel`/`/cancel` chỉ hủy tác vụ của bạn trong **đúng chat và đúng chế độ** đã khởi chạy.
+  Dừng/restart bot cũng dừng tác vụ và dọn file tạm. Không ghi file tải vào thư mục source;
+  tên file do server gửi được làm sạch, không thể dùng `../` để ghi đè `.env` hay session.
+- Chỉ nhận HTTP/HTTPS công khai, kiểm tra cả IP DNS thực dùng và từng redirect; chặn mạng
+  nội bộ/loopback/metadata, URL có tài khoản/mật khẩu và redirect hạ HTTPS xuống HTTP.
+  Không dùng lệnh này để gửi link chứa token hoặc tài liệu riêng vào nhóm.
+
+Helper Bot có `/ip`, `/whois`, `/l`; các màn hình vẫn dùng panel với **🏠 Home**. Về Home chỉ
+ẩn progress cũ, không tự hủy tải; file đã yêu cầu vẫn có thể gửi tới sau đó. Muốn dừng thì dùng
+`/cancel`. `/ip` và `/whois` cũng dùng được ở bước chưa nhập API; `/l` cần Helper đầy đủ.
+Không thêm thư viện ngoài `requirements.txt` hiện tại; không thay đổi `.music` Last.fm.
 
 ### Helper Bot ít thông báo
 

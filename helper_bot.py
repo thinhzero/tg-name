@@ -43,6 +43,8 @@ from shell_commands import shell_runner, run_shell_message, config_secrets
 from helper_panel import HelperPanels
 from presence import presence, ping_message, parse_afk_args
 from bot_commands import register_helper_commands
+from network_tools import lookup_message
+from file_transfer import file_transfers, link_argument
 
 # Lưu trạng thái đàm thoại của user: user_id -> {"action": ..., "data": ...}
 user_sessions = {}
@@ -531,6 +533,23 @@ async def handle_update_action(message, token, confirm=True, userbot=False):
     )
 
 
+async def handle_link_transfer(event, client, argument, lang, userbot=False):
+    if state.is_resetting:
+        return
+    url = await link_argument(event, argument)
+
+    async def upload(path, filename, progress):
+        await client.send_file(
+            event.chat_id, str(path), caption=escape(filename), parse_mode="html",
+            force_document=True, silent=True, progress_callback=progress,
+            reply_to=getattr(event, "reply_to_msg_id", None),
+        )
+    await file_transfers.run(
+        url, event.edit, upload, owner_id=int(event.sender_id), chat_id=event.chat_id,
+        userbot=userbot, lang=lang,
+    )
+
+
 def format_random_entries(title, entries):
     """Chia danh sách thành nhiều tin nhắn, không vượt giới hạn Telegram."""
     pages = []
@@ -620,6 +639,8 @@ def format_help(lang="vi", helper=False):
             f"• <code>{p}status</code>, <code>{p}pause</code>, <code>{p}resume</code>\n"
             f"• <code>{p}afk [10s] [reason]</code>, <code>{p}on</code>: away / back; replies auto-delete (default 10s).\n"
             f"• <code>{p}ping [host]</code>: Telegram latency + uptime; optional system ping.\n"
+            f"• <code>{p}ip 1.1.1.1</code>, <code>{p}whois example.com</code>: public IP / domain lookup.\n"
+            f"• <code>{p}l URL</code>: direct link → Telegram (max 100 MiB); <code>{p}cancel</code> stops it.\n"
             f"{settings_help}"
             f"• <code>{p}bioformat {{weather_short}} ⏰ HH:mm</code>: change bio.\n"
             f"• <code>{p}previewbio</code>: check the 70-character bio limit.\n"
@@ -644,6 +665,8 @@ def format_help(lang="vi", helper=False):
         f"• <code>{p}status</code>, <code>{p}pause</code>, <code>{p}resume</code>\n"
         f"• <code>{p}afk [10s] [lý do]</code>, <code>{p}on</code>: bật / tắt vắng mặt; tự xóa trả lời (mặc định 10s).\n"
         f"• <code>{p}ping [host]</code>: độ trễ Telegram + uptime; có host thì ping hệ thống.\n"
+        f"• <code>{p}ip 1.1.1.1</code>, <code>{p}whois example.com</code>: tra IP / tên miền.\n"
+        f"• <code>{p}l URL</code>: link trực tiếp → Telegram (tối đa 100 MiB); <code>{p}cancel</code> để hủy.\n"
         f"{settings_help}"
         f"• <code>{p}bioformat {{weather_short}} ⏰ HH:mm</code>: đổi mẫu bio.\n"
         f"• <code>{p}previewbio</code>: kiểm tra giới hạn 70 ký tự bio.\n"
@@ -657,13 +680,25 @@ def format_help(lang="vi", helper=False):
 
 def register_userbot_handlers(client: TelegramClient):
     """Đăng ký các lệnh tự điều khiển trên Userbot (.status, .name, .update, ...)"""
-    @client.on(events.NewMessage(outgoing=True, pattern=r"^\.(help|status|update|updatecheck|updateconfirm|updatecancel|updaterandom|lsrandom|rmrandom|afk|on|ping|name|setname|basename|city|pause|resume|nameformat|setnameformat|bioformat|setbio|lastfm|music|bio|previewbio|preview|weather|lang)(?:\s+([\s\S]+))?$"))
+    @client.on(events.NewMessage(outgoing=True, pattern=r"^\.(help|status|update|updatecheck|updateconfirm|updatecancel|updaterandom|lsrandom|rmrandom|afk|on|ping|ip|whois|l|cancel|name|setname|basename|city|pause|resume|nameformat|setnameformat|bioformat|setbio|lastfm|music|bio|previewbio|preview|weather|lang)(?:\s+([\s\S]+))?$"))
     async def userbot_command_handler(event):
         cmd = event.pattern_match.group(1).lower()
         arg = (event.pattern_match.group(2) or "").strip()
         cur_lang = state.config.get("LANGUAGE", "vi")
 
-        if cmd == "afk":
+        if cmd in ("ip", "whois"):
+            if not state.is_resetting:
+                await lookup_message(cmd, arg, event.edit, cur_lang)
+
+        elif cmd == "l":
+            await handle_link_transfer(event, client, arg, cur_lang, userbot=True)
+
+        elif cmd == "cancel":
+            if not state.is_resetting:
+                cancelled = file_transfers.cancel(int(event.sender_id), event.chat_id, userbot=True)
+                await event.edit(get_text("transfer_cancelled" if cancelled else "transfer_not_running", cur_lang), parse_mode="html")
+
+        elif cmd == "afk":
             try:
                 delete_after, reason = parse_afk_args(arg)
             except ValueError:
@@ -833,9 +868,10 @@ def register_bot_handlers(bot_client: TelegramClient):
         if not event.is_private or state.is_resetting:
             raise events.StopPropagation
 
-    @on(events.NewMessage(pattern=r"^/cancel$"))
+    @on(events.NewMessage(pattern=r"^/cancel(?:@\w+)?\s*$"))
     async def cancel_cmd(event):
-        if not is_admin(event.sender_id): return
+        if not is_admin(event.sender_id) or not getattr(event, "is_private", True) or state.is_resetting: return
+        file_transfers.cancel(event.sender_id, getattr(event, "chat_id", event.sender_id))
         await cancel_user_dialog(event.sender_id)
         await event.reply("❌ <b>Đã hủy thao tác hiện tại!</b>", parse_mode="html", buttons=get_main_keyboard())
 
@@ -961,6 +997,19 @@ def register_bot_handlers(bot_client: TelegramClient):
                 return
             presence.enable(reason, delete_after=delete_after)
             await event.reply(presence.notice(lang), parse_mode="html")
+
+    @on(events.NewMessage(pattern=r"^/(ip|whois)(?:@\w+)?(?:\s+([\s\S]+))?\s*$"))
+    async def lookup_cmd(event):
+        if not is_admin(event.sender_id) or not event.is_private or state.is_resetting: return
+        await lookup_message(
+            event.pattern_match.group(1), (event.pattern_match.group(2) or "").strip(),
+            event.edit, state.config.get("LANGUAGE", "vi"),
+        )
+
+    @on(events.NewMessage(pattern=r"^/l(?:@\w+)?(?:\s+([\s\S]+))?\s*$"))
+    async def link_transfer_cmd(event):
+        if not is_admin(event.sender_id) or not event.is_private or state.is_resetting: return
+        await handle_link_transfer(event, bot_client, (event.pattern_match.group(1) or "").strip(), state.config.get("LANGUAGE", "vi"))
 
     @on(events.NewMessage(pattern=r"^/(updaterandom|lsrandom|rmrandom)(?:@\w+)?(?:\s+([\s\S]+))?$"))
     async def random_cmd(event):
@@ -1232,7 +1281,7 @@ def register_bot_handlers(bot_client: TelegramClient):
     async def _user_input_handler_impl(event):
         if not is_admin(event.sender_id): return
         if event.raw_text.strip() == "/cancel": return
-        if re.match(r"^/(?:updaterandom|lsrandom|rmrandom|help|updatecheck|start|home|setup|login|reset|settings|shell|afk|on|ping)(?:@\w+)?(?:\s|$)", event.raw_text.strip()): return
+        if re.match(r"^/(?:updaterandom|lsrandom|rmrandom|help|updatecheck|start|home|setup|login|reset|settings|shell|afk|on|ping|ip|whois|l|cancel)(?:@\w+)?(?:\s|$)", event.raw_text.strip()): return
 
         sess = user_sessions.get(event.sender_id)
         if not sess: return
@@ -2080,6 +2129,7 @@ async def run_standalone_bot():
         await bot_client.run_until_disconnected()
     finally:
         try:
+            await file_transfers.close(userbot=False)
             for user_id in list(user_sessions):
                 await cancel_user_dialog(user_id)
             await engine.stop()

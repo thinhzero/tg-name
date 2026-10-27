@@ -25,6 +25,46 @@ MONTHS = {
 }
 
 TEXTS: Dict[str, Dict[str, str]] = {
+    "lookup_ip_usage": {
+        "vi": "🌐 Dùng <code>.ip 1.1.1.1</code> hoặc <code>/ip 1.1.1.1</code>. Nhận IPv4/IPv6 công khai; không tự tra IP máy chạy bot.",
+        "en": "🌐 Use <code>.ip 1.1.1.1</code> or <code>/ip 1.1.1.1</code>. Accepts public IPv4/IPv6; never looks up the bot host's IP implicitly."
+    },
+    "lookup_whois_usage": {
+        "vi": "🔎 Dùng <code>.whois example.com</code> hoặc <code>/whois example.com</code>. Chỉ nhập tên miền, không nhập URL/đường dẫn/port.",
+        "en": "🔎 Use <code>.whois example.com</code> or <code>/whois example.com</code>. Enter a domain, not a URL, path or port."
+    },
+    "lookup_working": {"vi": "🔎 Đang tra cứu...", "en": "🔎 Looking up..."},
+    "lookup_failed": {"vi": "❌ Chưa tra được. Dịch vụ có thể đang lỗi, không hỗ trợ tên miền này hoặc mạng bị gián đoạn; thử lại sau.", "en": "❌ Lookup failed. The service may be unavailable, the domain unsupported, or the connection interrupted; try again later."},
+    "lookup_missing": {"vi": "⚠️ Không tìm thấy dữ liệu công khai cho địa chỉ/tên miền này.", "en": "⚠️ No public data was found for this address/domain."},
+    "lookup_rate_limited": {"vi": "⏳ Dịch vụ đang giới hạn lượt tra cứu. Hãy đợi rồi thử lại.", "en": "⏳ The lookup service is rate-limiting requests. Wait before retrying."},
+    "lookup_ip_result": {
+        "vi": "🌐 <b>IP {ip}</b>\n🏳️ Quốc gia: {country}\n🏙️ Khu vực: {region} · {city}\n📡 ISP: {isp}\n🏢 Tổ chức: {org}\n🔗 ASN: {asn}\n\n<i>Nguồn: ipwho.is · Vị trí chỉ là ước lượng.</i>",
+        "en": "🌐 <b>IP {ip}</b>\n🏳️ Country: {country}\n🏙️ Region: {region} · {city}\n📡 ISP: {isp}\n🏢 Organization: {org}\n🔗 ASN: {asn}\n\n<i>Source: ipwho.is · Location is approximate.</i>"
+    },
+    "lookup_whois_result": {
+        "vi": "🔎 <b>Tên miền {domain}</b>\n🏢 Nhà đăng ký: {registrar}\n📅 Đăng ký: {registered}\n⌛ Hết hạn: {expires}\n🔄 Thay đổi: {changed}\n📋 Trạng thái: {status}\n🌐 Nameserver: {ns}\n\n<i>Nguồn: RDAP qua rdap.org · Không hiện thông tin liên hệ cá nhân.</i>",
+        "en": "🔎 <b>Domain {domain}</b>\n🏢 Registrar: {registrar}\n📅 Registered: {registered}\n⌛ Expires: {expires}\n🔄 Changed: {changed}\n📋 Status: {status}\n🌐 Nameservers: {ns}\n\n<i>Source: RDAP via rdap.org · Personal contact details are omitted.</i>"
+    },
+    "transfer_usage": {
+        "vi": "📥 Dùng <code>.l https://example.com/file.zip</code> hoặc <code>/l URL</code>; có thể reply tin chứa link. Chỉ tải link file trực tiếp, tối đa 100 MiB. Dùng <code>.cancel</code>/<code>/cancel</code> trong cùng chat để hủy.",
+        "en": "📥 Use <code>.l https://example.com/file.zip</code> or <code>/l URL</code>; replying to a message containing a link also works. Direct file links only, max 100 MiB. Use <code>.cancel</code>/<code>/cancel</code> in the same chat to stop."
+    },
+    "transfer_starting": {"vi": "📥 Đang mở link tải...", "en": "📥 Opening the download..."},
+    "transfer_download": {"vi": "📥 Đang tải", "en": "📥 Downloading"},
+    "transfer_upload": {"vi": "📤 Đang gửi Telegram", "en": "📤 Sending to Telegram"},
+    "transfer_progress": {
+        "vi": "<b>{phase}</b>\n<code>{filename}</code>\n[{bar}] {percent}\n{current} / {total}\n⚡ {speed}/s · ETA: {eta}\n⏱ {elapsed}",
+        "en": "<b>{phase}</b>\n<code>{filename}</code>\n[{bar}] {percent}\n{current} / {total}\n⚡ {speed}/s · ETA: {eta}\n⏱ {elapsed}"
+    },
+    "transfer_done": {"vi": "✅ Đã gửi <code>{filename}</code> lên Telegram và dọn file tạm.", "en": "✅ Sent <code>{filename}</code> to Telegram and removed the temporary file."},
+    "transfer_cancelled": {"vi": "❌ Đã hủy tác vụ tải/gửi file.", "en": "❌ File transfer cancelled."},
+    "transfer_not_running": {"vi": "ℹ️ Không có tác vụ tải/gửi file của bạn đang chạy trong chat này.", "en": "ℹ️ You have no active file transfer in this chat."},
+    "transfer_busy": {"vi": "⏳ Đang có một tác vụ tải/gửi file. Chờ xong hoặc hủy tác vụ đó trước.", "en": "⏳ A file transfer is already running. Wait or cancel that transfer first."},
+    "transfer_unsafe": {"vi": "⚠️ Chỉ nhận link HTTP/HTTPS công khai; không nhận file cục bộ, URL có tài khoản/mật khẩu, mạng nội bộ hay redirect không an toàn.", "en": "⚠️ Only public HTTP/HTTPS links are allowed; local files, URLs with credentials, internal networks and unsafe redirects are rejected."},
+    "transfer_too_large": {"vi": "⚠️ File vượt giới hạn {limit}. Đã dừng và dọn phần tải dở.", "en": "⚠️ File exceeds the {limit} limit. Stopped and removed the partial download."},
+    "transfer_timeout": {"vi": "⌛ Tác vụ quá 5 phút. Đã dừng và dọn file tạm.", "en": "⌛ Transfer exceeded 5 minutes. Stopped and removed the temporary file."},
+    "transfer_empty": {"vi": "⚠️ Link trả về file rỗng; không gửi lên Telegram.", "en": "⚠️ The download is empty; nothing was sent to Telegram."},
+    "transfer_failed": {"vi": "❌ Không tải/gửi được file. Kiểm tra link trực tiếp, quyền ghi bộ nhớ hoặc mạng rồi thử lại. File tạm đã được dọn.", "en": "❌ Could not transfer the file. Check the direct link, storage permissions or connection and retry. Temporary files were removed."},
     "afk_no_reason": {"vi": "Không có", "en": "Not specified"},
     "afk_enabled": {
         "vi": "😴 <b>AFK</b>\nLý do: {reason}\nTin tự trả lời xóa sau {delete_after}s.\nDùng <code>.on</code> hoặc <code>/on</code> để tắt.",

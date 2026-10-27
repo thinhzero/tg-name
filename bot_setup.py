@@ -15,6 +15,7 @@ from i18n import get_text
 from shell_commands import shell_runner, run_shell_message, config_secrets
 from presence import ping_message
 from bot_commands import command_menu
+from network_tools import lookup_message
 
 
 API_ERROR_HINTS = {
@@ -232,6 +233,10 @@ class BotAPISetup:
         if not text:
             return False
         command = text.split()[0].split("@", 1)[0]
+        if command in ("/ip", "/whois"):
+            parts = text.split(maxsplit=1)
+            await lookup_message(command[1:], parts[1] if len(parts) > 1 else "", self.update_edit, state.config.get("LANGUAGE", "vi"))
+            return False
         if command == "/ping":
             parts = text.split(maxsplit=1)
             async def edit_ping(text, parse_mode="html"):

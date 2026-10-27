@@ -15,6 +15,9 @@ COMMANDS = (
     ("updatecheck", "Đếm commit GitHub, hỏi trước khi cập nhật", "Check GitHub commits; ask before updating"),
     ("shell", "Chạy lệnh Linux/Termux, VD: /shell ls -la", "Run Linux/Termux commands, e.g. /shell ls -la"),
     ("ping", "Độ trễ Telegram, uptime; có thể thêm host", "Telegram latency and uptime; optional host"),
+    ("ip", "Tra IP công khai: /ip 1.1.1.1", "Look up a public IP: /ip 1.1.1.1"),
+    ("whois", "Tra tên miền: /whois example.com", "Look up a domain: /whois example.com"),
+    ("l", "Tải link trực tiếp lên Telegram; tối đa 100 MiB", "Send a direct download to Telegram; max 100 MiB"),
     ("afk", "Bật AFK: /afk [10s] [lý do]; tự xóa trả lời", "Enable AFK: /afk [10s] [reason]; auto-delete replies"),
     ("on", "Tắt AFK", "Disable AFK"),
     ("preview", "Xem trước tên và bio", "Preview name and bio"),
@@ -33,9 +36,9 @@ COMMANDS = (
     ("rmrandom", "Xóa random bằng UID", "Remove a random entry by UID"),
     ("lang", "Đổi ngôn ngữ: /lang vi hoặc /lang en", "Change language: /lang vi or /lang en"),
     ("reset", "Đặt lại cấu hình, cần xác nhận", "Reset settings, with confirmation"),
-    ("cancel", "Hủy thao tác nhập hiện tại", "Cancel the current input step"),
+    ("cancel", "Hủy bước nhập hoặc tác vụ tải file", "Cancel input or the current file transfer"),
 )
-SETUP_COMMANDS = {"start", "home", "setup", "updatecheck", "shell", "ping", "reset", "cancel"}
+SETUP_COMMANDS = {"start", "home", "setup", "updatecheck", "shell", "ping", "ip", "whois", "reset", "cancel"}
 
 
 def command_menu(lang="vi", bootstrap=False):
