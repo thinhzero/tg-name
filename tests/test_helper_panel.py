@@ -27,27 +27,31 @@ class HelperPanelTests(unittest.IsolatedAsyncioTestCase):
         self.panels = HelperPanels(lambda: [[Button.inline("🏠 Home", data="main_menu")]])
         self.message = SimpleNamespace(edit=AsyncMock(), delete=AsyncMock())
 
-    def event(self, *, callback=False, sender=42):
-        return SimpleNamespace(
+    def event(self, *, callback=False, sender=42, text="", message_id=None):
+        event = SimpleNamespace(
             sender_id=sender, chat_id=sender, data=b"test" if callback else None,
+            raw_text=text,
             reply=AsyncMock(return_value=self.message), respond=AsyncMock(return_value=self.message),
             edit=AsyncMock(), delete=AsyncMock(),
         )
+        if message_id is not None:
+            event.message_id = message_id
+        return event
 
     def callback_data(self, kwargs):
         return [getattr(button, "data", None) or button.type.data for row in kwargs["buttons"] for button in row]
 
-    async def test_first_message_is_silent_and_future_commands_edit_it(self):
-        first = self.event()
+    async def test_each_typed_command_sends_a_new_silent_message(self):
+        first = self.event(text="/status")
         await self.panels.wrap(first).reply("Home")
         first.reply.assert_awaited_once()
         self.assertTrue(first.reply.call_args.kwargs["silent"])
         self.assertIn(b"main_menu", self.callback_data(first.reply.call_args.kwargs))
-        second = self.event()
+        second = self.event(text="/settings")
         await self.panels.wrap(second).reply("Settings")
-        second.reply.assert_not_awaited()
-        self.message.edit.assert_awaited_once()
-        self.assertEqual(self.message.edit.call_args.args[0], "Settings")
+        second.reply.assert_awaited_once()
+        self.assertTrue(second.reply.call_args.kwargs["silent"])
+        self.message.edit.assert_not_awaited()
         first.edit.assert_not_awaited()
         second.edit.assert_not_awaited()
 
@@ -113,12 +117,92 @@ class HelperPanelTests(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn("pages", old.panel)
 
     async def test_late_first_response_cannot_overwrite_newer_view(self):
-        old = self.panels.wrap(self.event(callback=True))
-        home = self.event(callback=True)
+        old = self.panels.wrap(self.event(callback=True, message_id=10))
+        home = self.event(callback=True, message_id=10)
         await self.panels.wrap(home).edit("Home")
         await old.respond("Slow callback finished")
         home.edit.assert_awaited_once()
         old.event.respond.assert_not_awaited()
+        old.event.edit.assert_not_awaited()
+
+    async def test_callbacks_edit_the_clicked_message_even_when_it_is_not_the_latest(self):
+        self.message.id = 10
+        first = self.event(text="/settings")
+        await self.panels.wrap(first).reply("Settings")
+        second_message = SimpleNamespace(id=20, edit=AsyncMock())
+        second = self.event(text="/status")
+        second.reply.return_value = second_message
+        await self.panels.wrap(second).reply("Status")
+        button = self.event(callback=True, message_id=10)
+        await self.panels.wrap(button).respond("Old menu's settings")
+        button.edit.assert_awaited_once_with("Old menu's settings", buttons=self.panels.home_keyboard())
+        button.respond.assert_not_awaited()
+        second_message.edit.assert_not_awaited()
+        self.message.edit.assert_not_awaited()
+
+    async def test_separate_command_progress_keeps_its_own_result_message(self):
+        first = self.event(text="/ip 1.1.1.1")
+        status = await self.panels.wrap(first).edit("First lookup")
+        second_message = SimpleNamespace(id=20, edit=AsyncMock())
+        second = self.event(text="/whois example.com")
+        second.respond.return_value = second_message
+        newer = await self.panels.wrap(second).edit("Second lookup")
+        latest_panel = self.panels.chats[42]
+        await status.edit("First result")
+        self.message.edit.assert_awaited_once()
+        self.assertEqual(self.message.edit.call_args.args[0], "First result")
+        second_message.edit.assert_not_awaited()
+        self.assertIs(self.panels.chats[42], latest_panel)
+        await newer.edit("Second result")
+        second_message.edit.assert_awaited_once()
+        first.respond.assert_awaited_once()
+        second.respond.assert_awaited_once()
+
+    async def test_slow_first_command_response_is_not_lost_after_a_new_command(self):
+        first_event = self.event(text="/whois example.com")
+        first = self.panels.wrap(first_event)
+        second = self.event(text="/status")
+        await self.panels.wrap(second).reply("Status")
+        await first.reply("Late lookup result")
+        first_event.reply.assert_awaited_once()
+        second.reply.assert_awaited_once()
+        self.message.edit.assert_not_awaited()
+
+    async def test_callback_after_restart_can_edit_without_a_cached_panel(self):
+        callback = self.event(callback=True, message_id=80)
+        await self.panels.wrap(callback).edit("Home")
+        callback.edit.assert_awaited_once()
+        callback.reply.assert_not_awaited()
+        self.assertIn((42, 80), self.panels.messages)
+
+    async def test_command_does_not_reuse_the_panel_remembered_at_startup(self):
+        startup = SimpleNamespace(id=5, edit=AsyncMock())
+        self.panels.remember(42, startup)
+        event = self.event(text="/status")
+        await self.panels.wrap(event).reply("Status")
+        event.reply.assert_awaited_once()
+        startup.edit.assert_not_awaited()
+
+    async def test_pagination_belongs_to_its_result_not_the_latest_command(self):
+        self.message.id = 10
+        await self.panels.wrap(self.event(text="/lsrandom")).show_pages(["Old first", "Old second"])
+        second_message = SimpleNamespace(id=20, edit=AsyncMock())
+        second = self.event(text="/lsrandom")
+        second.reply.return_value = second_message
+        await self.panels.wrap(second).show_pages(["New first", "New second"])
+        callback = self.event(callback=True, message_id=10)
+        view = self.panels.wrap(callback)
+        await view.show_pages(view.panel["pages"], 1)
+        self.assertEqual(callback.edit.call_args.args[0], "Old second")
+        second_message.edit.assert_not_awaited()
+
+    async def test_history_cache_is_bounded_without_reusing_old_command_messages(self):
+        self.panels.history_limit = 2
+        for message_id in (10, 20, 30):
+            self.message.id = message_id
+            await self.panels.wrap(self.event(text="/status")).reply("Status")
+        self.assertEqual(list(self.panels.messages), [(42, 20), (42, 30)])
+        self.message.edit.assert_not_awaited()
 
     async def test_pages_are_navigable_without_losing_content(self):
         event = self.event()
@@ -184,6 +268,71 @@ class HelperPanelHandlerTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(self.message.edit.await_count, 3)
         callback.respond.assert_not_awaited()
         start.reply.assert_awaited_once()
+
+    async def test_slash_commands_each_get_a_new_result_without_editing_prior_results(self):
+        for name, text in (("start_cmd", "/start"), ("settings_cmd", "/settings"), ("status_cmd", "/status"), ("help_cmd", "/help"), ("preview_cmd", "/preview"), ("start_cmd", "/home")):
+            event = self.event(text)
+            await self.run_handler(name, event)
+            event.reply.assert_awaited_once()
+            event.edit.assert_not_awaited()
+        self.message.edit.assert_not_awaited()
+
+    async def test_wizard_input_edits_its_prompt_even_after_a_new_utility_command(self):
+        callback = self.event(data="setup_lastfm_key")
+        callback.message_id = 10
+        await self.run_handler("callback_handler", callback)
+        second_message = SimpleNamespace(id=20, edit=AsyncMock())
+        command = self.event("/status")
+        command.reply.return_value = second_message
+        await self.run_handler("status_cmd", command)
+        await self.run_handler("user_input_handler", command)
+        secret = self.event("a" * 32)
+        await self.run_handler("user_input_handler", secret)
+        secret.delete.assert_awaited_once()
+        secret.reply.assert_not_awaited()
+        self.assertEqual(callback.edit.await_count, 2)
+        second_message.edit.assert_not_awaited()
+
+    async def test_slash_input_prompt_keeps_its_own_panel_after_another_command(self):
+        first = self.event("/setname")
+        self.message.id = 10
+        await self.run_handler("setname_cmd", first)
+        second_message = SimpleNamespace(id=20, edit=AsyncMock())
+        second = self.event("/status")
+        second.reply.return_value = second_message
+        await self.run_handler("status_cmd", second)
+        await self.run_handler("user_input_handler", second)
+        value = self.event("new name")
+        await self.run_handler("user_input_handler", value)
+        self.message.edit.assert_awaited_once()
+        second_message.edit.assert_not_awaited()
+        self.helper.state.update_config.assert_called_once_with({"BASE_NAME": "new name"})
+
+    async def test_utility_commands_are_not_mistaken_for_plain_wizard_input(self):
+        for action in ("input_name", "input_city", "input_fmt_name", "input_random_add"):
+            session = {"action": action}
+            self.helper.user_sessions[42] = session
+            for text in ("/status", "/preview", "/weather", "/music", "/pause", "/resume", "/lang en", "/update"):
+                event = self.event(text)
+                await self.run_handler("user_input_handler", event)
+                self.assertIs(self.helper.user_sessions[42], session)
+                event.reply.assert_not_awaited()
+                event.delete.assert_not_awaited()
+        self.helper.state.update_config.assert_not_called()
+
+    async def test_button_on_old_command_does_not_edit_the_newest_result(self):
+        self.message.id = 10
+        await self.run_handler("start_cmd", self.event("/start"))
+        second_message = SimpleNamespace(id=20, edit=AsyncMock())
+        newer = self.event("/status")
+        newer.reply.return_value = second_message
+        await self.run_handler("status_cmd", newer)
+        old_button = self.event(data="menu_settings")
+        old_button.message_id = 10
+        await self.run_handler("callback_handler", old_button)
+        old_button.edit.assert_awaited_once()
+        old_button.respond.assert_not_awaited()
+        second_message.edit.assert_not_awaited()
 
     async def test_home_cancels_pending_login_connection(self):
         temp = SimpleNamespace(disconnect=AsyncMock())

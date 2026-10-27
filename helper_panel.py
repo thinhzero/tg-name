@@ -1,6 +1,7 @@
-"""Một tin nhắn giao diện cho mỗi chat; không sửa tin nhắn của người dùng."""
+"""Lệnh mới có tin riêng; nút/wizard/progress chỉ sửa đúng tin của phiên đó."""
 
 import asyncio
+from collections import OrderedDict
 
 from telethon.errors import (
     MessageAuthorRequiredError, MessageEditTimeExpiredError,
@@ -12,31 +13,65 @@ MISSING_PANEL = (MessageAuthorRequiredError, MessageEditTimeExpiredError, Messag
 
 
 class HelperPanels:
-    def __init__(self, home_keyboard):
+    def __init__(self, home_keyboard, history_limit=100):
         self.home_keyboard = home_keyboard
         self.chats = {}
+        self.messages = OrderedDict()
+        self.history_limit = history_limit
 
-    def wrap(self, event):
+    @staticmethod
+    def new_panel(edit=None):
+        return {"edit": edit, "generation": 0, "lock": asyncio.Lock()}
+
+    def remember_id(self, chat, message_id, panel):
+        if not isinstance(message_id, int) or isinstance(message_id, bool):
+            return
+        key = (chat, message_id)
+        self.messages[key] = panel
+        self.messages.move_to_end(key)
+        while len(self.messages) > self.history_limit:
+            self.messages.popitem(last=False)
+
+    def wrap(self, event, panel=None):
         chat = getattr(event, "chat_id", None) or event.sender_id
-        panel = self.chats.setdefault(chat, {"edit": None, "generation": 0, "lock": asyncio.Lock()})
-        return PanelEvent(event, panel, self.home_keyboard)
+        if getattr(event, "data", None) is not None:
+            message_id = getattr(event, "message_id", None)
+            if isinstance(message_id, int) and not isinstance(message_id, bool):
+                panel = self.messages.get((chat, message_id)) or self.new_panel()
+                # Luôn nhắm tin có nút vừa bấm, không phải kết quả lệnh mới nhất.
+                panel["edit"] = event.edit
+                self.remember_id(chat, message_id, panel)
+        elif getattr(event, "raw_text", "").lstrip().startswith("/"):
+            panel = self.new_panel()
+        if panel is None:
+            panel = self.chats.get(chat) or self.new_panel()
+        return PanelEvent(event, panel, self, chat)
 
     def remember(self, chat, message):
-        panel = self.chats.setdefault(chat, {"edit": None, "generation": 0, "lock": asyncio.Lock()})
-        panel["edit"] = message.edit
+        panel = self.new_panel(message.edit)
+        self.chats[chat] = panel
+        self.remember_id(chat, getattr(message, "id", None), panel)
 
 
 class PanelEvent:
-    def __init__(self, event, panel, home_keyboard):
+    def __init__(self, event, panel, manager, chat):
         self.event = event
         self.panel = panel
-        self.home_keyboard = home_keyboard
+        self.manager = manager
+        self.chat = chat
+        self.home_keyboard = manager.home_keyboard
         self.generation = panel["generation"]
         self.active = False
+        self.visible = False
         self.message = PanelMessage(self)
 
     def __getattr__(self, key):
         return getattr(self.event, key)
+
+    def remember_visible(self):
+        if not self.visible:
+            self.manager.chats[self.chat] = self.panel
+            self.visible = True
 
     async def show(self, text, *, fallback="reply", **kwargs):
         async with self.panel["lock"]:
@@ -68,9 +103,11 @@ class PanelEvent:
                 try:
                     await edit(text, **kwargs)
                     self.panel["edit"] = edit
+                    self.remember_visible()
                     return self.message
                 except MessageNotModifiedError:
                     self.panel["edit"] = edit
+                    self.remember_visible()
                     return self.message
                 except MISSING_PANEL:
                     self.panel["edit"] = None
@@ -78,6 +115,8 @@ class PanelEvent:
             send = getattr(self.event, "respond" if fallback == "edit" else fallback)
             message = await send(text, silent=True, **kwargs)
             self.panel["edit"] = message.edit
+            self.manager.remember_id(self.chat, getattr(message, "id", None), self.panel)
+            self.remember_visible()
             return self.message
 
     async def reply(self, text, **kwargs):

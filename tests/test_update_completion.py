@@ -309,12 +309,12 @@ class CompletionStartupTests(unittest.IsolatedAsyncioTestCase):
         setup.register_commands = AsyncMock()
         message = {"message": {"date": setup.started_at, "from": {"id": 42}, "chat": {"id": 42, "type": "private"}, "text": "/start"}}
         await setup.handle(message)
-        self.assertEqual([call.args[0] for call in setup.call.call_args_list], ["editMessageText", "sendMessage"])
-        self.assertEqual(setup.panel_message_id, 55)
+        self.assertEqual([call.args[0] for call in setup.call.call_args_list], ["sendMessage", "sendMessage"])
+        self.assertEqual(setup.panel_message_id, 7)
         self.assertIn("Đã cập nhật xong", setup.call.call_args.kwargs["text"])
         setup.call.reset_mock()
         await setup.handle(message)
-        self.assertEqual([call.args[0] for call in setup.call.call_args_list], ["editMessageText"])
+        self.assertEqual([call.args[0] for call in setup.call.call_args_list], ["sendMessage"])
 
     async def test_bootstrap_startup_notifies_after_authenticated_getme(self):
         self.record()

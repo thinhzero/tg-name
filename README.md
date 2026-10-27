@@ -298,19 +298,26 @@ session, token, cookie hay thư mục downloads cũ. Xem [ghi chú chuyển đ�
   nội bộ/loopback/metadata, URL có tài khoản/mật khẩu và redirect hạ HTTPS xuống HTTP.
   Không dùng lệnh này để gửi link chứa token hoặc tài liệu riêng vào nhóm.
 
-Helper Bot có `/ip`, `/whois`, `/l`; các màn hình vẫn dùng panel với **🏠 Home**. Về Home chỉ
-ẩn progress cũ, không tự hủy tải; file đã yêu cầu vẫn có thể gửi tới sau đó. Muốn dừng thì dùng
+Helper Bot có `/ip`, `/whois`, `/l`; mỗi lệnh mở một tin kết quả riêng có **🏠 Home**. Bấm Home
+trên tin progress chỉ đổi giao diện tin đó, không tự hủy tải; file vẫn có thể gửi tới sau đó. Muốn dừng thì dùng
 `/cancel`. `/ip` và `/whois` cũng dùng được ở bước chưa nhập API; `/l` cần Helper đầy đủ.
 Không thêm thư viện ngoài `requirements.txt` hiện tại; không thay đổi `.music` Last.fm.
 
 ### Helper Bot ít thông báo
 
-Menu, wizard nhập cấu hình, xem trước và tiến trình cập nhật ưu tiên **sửa
-cùng một tin nhắn của bot**. Tin đầu tiên, hoặc khi tin cũ đã bị xóa/không sửa được, được gửi
-mới ở chế độ im lặng. Sau khi restart bot có thể tạo một panel mới; không sửa tin của bạn.
-Danh sách random dài có nút chuyển trang thay vì đẩy nhiều tin nối tiếp.
+**Mỗi lần gõ lệnh `/...` sẽ tạo một tin kết quả mới**, không ghi đè kết quả lệnh trước.
+Ví dụ `/status`, `/settings`, `/ping`, `/ip`, `/whois`, `/l`, `/updatecheck` và `/home` đều có
+tin riêng. Nếu có tiến trình như ping/tải/cập nhật, bot sửa **chính tin mới của lần gọi đó**,
+không đẩy nhiều tin progress nối tiếp và không sửa tin lệnh của bạn.
 
-Riêng **`/shell` trả một tin kết quả mới cho mỗi lần gọi**, không sửa panel hay kết quả lệnh
+**Bấm nút mới dùng lại tin giao diện đang bấm**: mở menu, cài đặt, xem trước, về **🏠 Home**,
+xác nhận cập nhật/reset và chuyển trang đều sửa đúng tin chứa nút, kể cả đó là một tin cũ.
+Các bước nhập wizard tiếp tục sửa tin đã hỏi thông tin; gọi một lệnh khác giữa chừng không
+làm wizard ghi đè kết quả lệnh đó. Tin giao diện bị xóa/không sửa được mới gửi một tin thay thế.
+Tin mới gửi im lặng. Quy tắc này áp dụng cả bước khởi tạo trước khi nhập API; các lệnh `.`
+của Userbot vẫn sửa chính tin lệnh như trước.
+
+**`/shell` vẫn trả một tin kết quả mới cho mỗi lần gọi**, không sửa panel hay kết quả lệnh
 trước đó. Kết quả gửi im lặng, vẫn giữ lịch sử từng lệnh, kể cả khi bạn đã quay về Home.
 
 Gõ **`/`** trong chat riêng với bot để xem danh sách lệnh và mô tả. Bot tự đăng ký gợi ý cho

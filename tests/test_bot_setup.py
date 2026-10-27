@@ -471,6 +471,66 @@ class BotAPISetupPanelTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual([call.args[0] for call in self.setup.call.call_args_list], ["sendMessage", "editMessageText"])
         self.assertIn("Uptime", self.setup.call.call_args.kwargs["text"])
 
+    async def test_each_ping_command_sends_one_new_status_and_edits_only_that_status(self):
+        next_id = 20
+        async def call(method, **payload):
+            nonlocal next_id
+            if method == "sendMessage":
+                next_id += 1
+                return {"message_id": next_id}
+            return {"message_id": payload.get("message_id", 0)}
+        self.setup.call.side_effect = call
+        self.setup.panel_message_id = 10
+        message = {"message": {"date": self.setup.started_at, "from": {"id": 42}, "chat": {"id": 42, "type": "private"}, "text": "/ping"}}
+        await self.setup.handle(message)
+        await self.setup.handle(message)
+        calls = self.setup.call.call_args_list
+        self.assertEqual([call.args[0] for call in calls], ["sendMessage", "editMessageText", "sendMessage", "editMessageText"])
+        self.assertEqual([call.kwargs["message_id"] for call in calls if call.args[0] == "editMessageText"], [21, 22])
+
+    async def test_button_always_edits_the_clicked_message_even_if_newer_results_exist(self):
+        self.setup.panel_message_id = 99
+        await self.setup.handle({"callback_query": {
+            "id": "cb", "data": "main_menu", "from": {"id": 42},
+            "message": {"message_id": 7, "chat": {"id": 42, "type": "private"}},
+        }})
+        self.assertEqual(self.setup.call.call_args.args[0], "editMessageText")
+        self.assertEqual(self.setup.call.call_args.kwargs["message_id"], 7)
+        self.assertNotIn("sendMessage", [call.args[0] for call in self.setup.call.call_args_list])
+
+    async def test_plain_api_input_keeps_editing_its_prompt_after_a_new_command(self):
+        await self.setup.handle({"callback_query": {
+            "id": "cb", "data": "bootstrap_api", "from": {"id": 42},
+            "message": {"message_id": 10, "chat": {"id": 42, "type": "private"}},
+        }})
+        self.assertEqual(self.setup.input_panel_message_id, 10)
+        await self.setup.handle({"message": {"date": self.setup.started_at, "from": {"id": 42}, "chat": {"id": 42, "type": "private"}, "text": "/ping"}})
+        self.assertEqual(self.setup.panel_message_id, 7)
+        self.setup.call.reset_mock()
+        await self.setup.handle({"message": {"message_id": 90, "date": self.setup.started_at, "from": {"id": 42}, "chat": {"id": 42, "type": "private"}, "text": "123"}})
+        self.assertEqual(self.setup.action, "api_hash")
+        self.assertEqual(self.setup.call.call_args.args[0], "editMessageText")
+        self.assertEqual(self.setup.call.call_args.kwargs["message_id"], 10)
+        self.setup.call.assert_any_await("deleteMessage", chat_id=42, message_id=90)
+
+    async def test_deleted_wizard_prompt_replacement_is_remembered_for_next_input(self):
+        self.setup.action = "api_id"
+        self.setup.input_panel_message_id = 10
+        self.setup.panel_message_id = 99
+        async def call(method, **payload):
+            if method == "editMessageText" and payload["message_id"] == 10:
+                raise self.module.BotSetupError(400, description="Bad Request: message to edit not found")
+            return {"message_id": 11}
+        self.setup.call.side_effect = call
+        def message(text):
+            return {"message": {"message_id": 90, "date": self.setup.started_at, "from": {"id": 42}, "chat": {"id": 42, "type": "private"}, "text": text}}
+        await self.setup.handle(message("123"))
+        self.assertEqual(self.setup.input_panel_message_id, 11)
+        self.setup.call.reset_mock()
+        await self.setup.handle(message("invalid hash"))
+        self.assertEqual([call.args[0] for call in self.setup.call.call_args_list], ["deleteMessage", "editMessageText"])
+        self.assertEqual(self.setup.call.call_args.kwargs["message_id"], 11)
+
 
 @unittest.skipUnless(HAS_DEPENDENCIES, "Cài requirements.txt để kiểm thử đăng nhập qua bot")
 class HelperOnboardingTests(unittest.IsolatedAsyncioTestCase):

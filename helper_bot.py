@@ -50,6 +50,16 @@ from file_transfer import file_transfers, link_argument
 user_sessions = {}
 
 
+def begin_user_dialog(event, action):
+    """Gắn bước nhập với tin đã hỏi, không với kết quả lệnh mới nhất trong chat."""
+    session = {"action": action}
+    panel = getattr(event, "panel", None)
+    if panel is not None:
+        session["_panel"] = panel
+    user_sessions[event.sender_id] = session
+    return session
+
+
 def get_home_keyboard():
     return [[Button.inline("🏠 Home", data="main_menu")]]
 
@@ -856,8 +866,10 @@ def register_bot_handlers(bot_client: TelegramClient):
         def register(handler):
             @wraps(handler)
             async def dispatch(event):
+                session = user_sessions.get(event.sender_id)
                 if is_admin(event.sender_id) and getattr(event, "is_private", True):
-                    event = panels.wrap(event)
+                    input_panel = session.get("_panel") if session else None
+                    event = panels.wrap(event, panel=input_panel if getattr(event, "data", None) is None else None)
                 return await handler(event)
             return bot_client.on(builder)(dispatch)
         return register
@@ -940,7 +952,7 @@ def register_bot_handlers(bot_client: TelegramClient):
     async def login_cmd(event):
         if not is_admin(event.sender_id): return
         await cancel_user_dialog(event.sender_id)
-        user_sessions[event.sender_id] = {"action": "login_wait_phone"}
+        begin_user_dialog(event, "login_wait_phone")
         msg = (
             "📱 <b>ĐĂNG NHẬP TELEGRAM USERBOT</b>\n"
             "━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
@@ -1053,7 +1065,7 @@ def register_bot_handlers(bot_client: TelegramClient):
         val = (event.pattern_match.group(1) or "").strip()
         lang = state.config.get("LANGUAGE", "vi")
         if not val:
-            user_sessions[event.sender_id] = {"action": "input_name"}
+            begin_user_dialog(event, "input_name")
             curr = state.config.get("BASE_NAME", "tên")
             if lang == "en":
                 prompt = (
@@ -1092,7 +1104,7 @@ def register_bot_handlers(bot_client: TelegramClient):
         val = (event.pattern_match.group(1) or "").strip()
         lang = state.config.get("LANGUAGE", "vi")
         if not val:
-            user_sessions[event.sender_id] = {"action": "input_fmt_name"}
+            begin_user_dialog(event, "input_fmt_name")
             if lang == "en":
                 prompt = (
                     "🎨 <b>CUSTOMIZE NAME FORMAT (NAME_FORMAT)</b>\n\n"
@@ -1145,7 +1157,7 @@ def register_bot_handlers(bot_client: TelegramClient):
             return
 
         if not val:
-            user_sessions[event.sender_id] = {"action": "input_fmt_bio"}
+            begin_user_dialog(event, "input_fmt_bio")
             if lang == "en":
                 msg = (
                     "📝 <b>ENTER NEW BIO FORMAT (BIO_FORMAT)</b>\n\n"
@@ -1190,7 +1202,7 @@ def register_bot_handlers(bot_client: TelegramClient):
         if not is_admin(event.sender_id): return
         val = (event.pattern_match.group(1) or "").strip()
         if not val:
-            user_sessions[event.sender_id] = {"action": "input_city"}
+            begin_user_dialog(event, "input_city")
             await event.reply("📍 <b>Vui lòng gửi tên Tỉnh/Thành phố mới:</b>\n<i>(Ví dụ: Hanoi, Ho Chi Minh, Da Nang, Bac Ninh)</i>", parse_mode="html", buttons=get_cancel_keyboard())
             return
         state.update_config({"CITY": val})
@@ -1215,7 +1227,7 @@ def register_bot_handlers(bot_client: TelegramClient):
         if not is_admin(event.sender_id): return
         val = (event.pattern_match.group(1) or "").strip()
         if not val:
-            user_sessions[event.sender_id] = {"action": "input_lastfm_user"}
+            begin_user_dialog(event, "input_lastfm_user")
             curr = state.config.get("LASTFM_USERNAME") or "Chưa cấu hình"
             await event.reply(
                 f"🎵 <b>CẤU HÌNH TÀI KHOẢN LAST.FM (NGHE NHẠC)</b>\n"
@@ -1281,7 +1293,7 @@ def register_bot_handlers(bot_client: TelegramClient):
     async def _user_input_handler_impl(event):
         if not is_admin(event.sender_id): return
         if event.raw_text.strip() == "/cancel": return
-        if re.match(r"^/(?:updaterandom|lsrandom|rmrandom|help|updatecheck|start|home|setup|login|reset|settings|shell|afk|on|ping|ip|whois|l|cancel)(?:@\w+)?(?:\s|$)", event.raw_text.strip()): return
+        if re.match(r"^/(?:updaterandom|lsrandom|rmrandom|help|updatecheck|start|home|setup|login|reset|settings|shell|afk|on|ping|ip|whois|l|cancel|status|update|pause|resume|lang|language|preview|previewbio|weather|music|nowplaying)(?:@\w+)?(?:\s|$)", event.raw_text.strip()): return
 
         sess = user_sessions.get(event.sender_id)
         if not sess: return
@@ -1648,12 +1660,12 @@ def register_bot_handlers(bot_client: TelegramClient):
             await event.answer()
             return
         if data == "setup_random_add":
-            user_sessions[event.sender_id] = {"action": "input_random_add"}
+            begin_user_dialog(event, "input_random_add")
             await event.respond("🎲 Gửi nội dung random muốn thêm (mỗi dòng một mục), hoặc /cancel:", buttons=get_cancel_keyboard(lang))
             await event.answer()
             return
         if data == "setup_lastfm_key":
-            user_sessions[event.sender_id] = {"action": "input_lastfm_key"}
+            begin_user_dialog(event, "input_lastfm_key")
             await event.respond("🔑 Gửi Last.fm API key riêng (32 ký tự hex), 0 để xóa hoặc /cancel. Tin nhắn chứa key sẽ được cố xóa sau khi xử lý.", buttons=get_cancel_keyboard(lang))
             await event.answer()
             return
@@ -1789,7 +1801,7 @@ def register_bot_handlers(bot_client: TelegramClient):
 
         # 8. Cài đặt Đăng nhập
         elif data == "setup_login":
-            user_sessions[event.sender_id] = {"action": "login_wait_phone"}
+            begin_user_dialog(event, "login_wait_phone")
             if lang == "en":
                 msg = (
                     "📱 <b>TELEGRAM USERBOT LOGIN</b>\n"
@@ -1809,7 +1821,7 @@ def register_bot_handlers(bot_client: TelegramClient):
 
         # 9. Cài đặt Tên cố định
         elif data == "setup_name":
-            user_sessions[event.sender_id] = {"action": "input_name"}
+            begin_user_dialog(event, "input_name")
             curr = state.config.get("BASE_NAME", "name")
             if lang == "en":
                 msg = f"✏️ <b>CHANGE FIXED NAME (BASE_NAME)</b>\nCurrent: <code>{curr}</code>\n\n👉 <b>Enter your new name:</b>"
@@ -1820,7 +1832,7 @@ def register_bot_handlers(bot_client: TelegramClient):
 
         # 10. Cài đặt Thành phố
         elif data == "setup_city":
-            user_sessions[event.sender_id] = {"action": "input_city"}
+            begin_user_dialog(event, "input_city")
             curr = state.config.get("CITY", "Bac Ninh")
             if lang == "en":
                 msg = f"📍 <b>CHANGE CITY</b>\nCurrent: <code>{curr}</code>\n\n👉 <b>Enter new city name:</b>\n<i>(e.g. Hanoi, Ho Chi Minh, Da Nang, London, New York)</i>"
@@ -1831,7 +1843,7 @@ def register_bot_handlers(bot_client: TelegramClient):
 
         # 11. Cài đặt Thời tiết
         elif data == "setup_weather":
-            user_sessions[event.sender_id] = {"action": "input_weather_api"}
+            begin_user_dialog(event, "input_weather_api")
             curr = secret_status(state.config.get("WEATHER_API"), lang)
             if lang == "en":
                 msg = (
@@ -1852,7 +1864,7 @@ def register_bot_handlers(bot_client: TelegramClient):
 
         # 12. Cài đặt Last.fm (Nhạc)
         elif data == "setup_lastfm":
-            user_sessions[event.sender_id] = {"action": "input_lastfm_user"}
+            begin_user_dialog(event, "input_lastfm_user")
             curr = state.config.get("LASTFM_USERNAME") or ("Not configured" if lang == "en" else "Chưa cấu hình")
             if lang == "en":
                 msg = (
@@ -1882,7 +1894,7 @@ def register_bot_handlers(bot_client: TelegramClient):
         elif data.startswith("tz_"):
             tz_val = data.replace("tz_", "")
             if tz_val == "custom":
-                user_sessions[event.sender_id] = {"action": "input_tz_custom"}
+                begin_user_dialog(event, "input_tz_custom")
                 tz_prompt = "🕒 <b>Enter standard IANA timezone:</b>\n<i>(e.g. Asia/Ho_Chi_Minh, America/New_York, Europe/London)</i>" if lang == "en" else "🕒 <b>Nhập múi giờ chuẩn IANA:</b>\n<i>(Ví dụ: Asia/Ho_Chi_Minh, America/New_York, Europe/London)</i>"
                 await event.respond(tz_prompt, parse_mode="html", buttons=get_cancel_keyboard(lang))
             else:
@@ -1894,7 +1906,7 @@ def register_bot_handlers(bot_client: TelegramClient):
 
         # 14. Cài đặt API Creds
         elif data == "setup_api_creds":
-            user_sessions[event.sender_id] = {"action": "input_api_id"}
+            begin_user_dialog(event, "input_api_id")
             if lang == "en":
                 msg = (
                     "🆔 <b>CONFIGURE TELEGRAM API_ID & API_HASH</b>\n"
@@ -1986,7 +1998,7 @@ def register_bot_handlers(bot_client: TelegramClient):
                 await event.edit(msg, parse_mode="html", buttons=get_format_keyboard(lang))
 
         elif data == "fmt_name":
-            user_sessions[event.sender_id] = {"action": "input_fmt_name"}
+            begin_user_dialog(event, "input_fmt_name")
             if lang == "en":
                 msg = (
                     "✏️ <b>ENTER NEW NAME_FORMAT PATTERN</b>\n\n"
@@ -2009,7 +2021,7 @@ def register_bot_handlers(bot_client: TelegramClient):
             await event.answer()
 
         elif data == "fmt_bio":
-            user_sessions[event.sender_id] = {"action": "input_fmt_bio"}
+            begin_user_dialog(event, "input_fmt_bio")
             if lang == "en":
                 msg = (
                     "📝 <b>ENTER NEW BIO_FORMAT PATTERN</b>\n\n"

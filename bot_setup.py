@@ -68,6 +68,8 @@ class BotAPISetup:
         self.api_id = ""
         self.started_at = int(time.time())
         self.panel_message_id = None
+        self.input_panel_message_id = None
+        self._input_response = False
 
     def text(self, vi, en):
         return en if state.config.get("LANGUAGE") == "en" else vi
@@ -161,6 +163,16 @@ class BotAPISetup:
             await asyncio.wait_for(client.disconnect(), timeout=10)
 
     async def handle(self, update):
+        self._input_response = False
+        try:
+            return await self._handle(update)
+        finally:
+            if self.action is None:
+                self.input_panel_message_id = None
+            elif self._input_response:
+                self.input_panel_message_id = self.panel_message_id
+
+    async def _handle(self, update):
         if state.is_resetting:
             return False
         callback = update.get("callback_query")
@@ -168,7 +180,7 @@ class BotAPISetup:
             if not self.authorized(callback.get("message", {}), callback.get("from", {})):
                 return False
             message_id = callback.get("message", {}).get("message_id")
-            if self.panel_message_id is None and isinstance(message_id, int):
+            if isinstance(message_id, int):
                 self.panel_message_id = message_id
             try:
                 await self.call("answerCallbackQuery", callback_query_id=callback["id"])
@@ -210,6 +222,7 @@ class BotAPISetup:
                 finally:
                     bot_updater.request_restart()
             elif data == "bootstrap_api":
+                self._input_response = True
                 self.action = "api_id"
                 self.api_id = ""
                 await self.send(self.text("🆔 Gửi <b>API_ID</b> của bạn (số dương):", "🆔 Send your <b>API_ID</b> (a positive number):"), self.cancel_keyboard())
@@ -233,6 +246,9 @@ class BotAPISetup:
         if not text:
             return False
         command = text.split()[0].split("@", 1)[0]
+        if text.startswith("/") and command != "/shell":
+            # Chỉ lần gọi lệnh mới mở tin mới; các bước progress sau vẫn sửa tin đó.
+            self.panel_message_id = None
         if command in ("/ip", "/whois"):
             parts = text.split(maxsplit=1)
             await lookup_message(command[1:], parts[1] if len(parts) > 1 else "", self.update_edit, state.config.get("LANGUAGE", "vi"))
@@ -273,6 +289,9 @@ class BotAPISetup:
             await self.show_menu()
             return False
 
+        self._input_response = True
+        if self.input_panel_message_id is not None:
+            self.panel_message_id = self.input_panel_message_id
         try:
             await self.call("deleteMessage", chat_id=self.admin_id, message_id=message["message_id"])
         except (BotSetupError, aiohttp.ClientError, asyncio.TimeoutError):
