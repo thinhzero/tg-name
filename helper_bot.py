@@ -42,6 +42,7 @@ from reset_control import reset_requests, reset_notice, reset_buttons, apply_con
 from shell_commands import shell_runner, run_shell_message, config_secrets
 from helper_panel import HelperPanels
 from presence import presence, ping_message
+from bot_commands import register_helper_commands
 
 # Lưu trạng thái đàm thoại của user: user_id -> {"action": ..., "data": ...}
 user_sessions = {}
@@ -840,6 +841,7 @@ def register_bot_handlers(bot_client: TelegramClient):
             return
         await cancel_user_dialog(event.sender_id)
         lang = state.config.get("LANGUAGE", "vi")
+        await register_helper_commands(bot_client, event.sender_id, lang)
         if not state.config.get("SESSION_STRING") and not engine.is_running:
             await event.reply(format_setup_guide(lang), parse_mode="html", buttons=get_setup_keyboard(lang))
         else:
@@ -871,10 +873,12 @@ def register_bot_handlers(bot_client: TelegramClient):
         if arg in ("en", "english", "anh"):
             state.update_config({"LANGUAGE": "en"})
             state.trigger_update()
+            await register_helper_commands(bot_client, event.sender_id, "en")
             await event.reply(get_text("lang_switched", "en"), parse_mode="html", buttons=get_main_keyboard("en"))
         elif arg in ("vi", "vietnamese", "viet", "tiengviet"):
             state.update_config({"LANGUAGE": "vi"})
             state.trigger_update()
+            await register_helper_commands(bot_client, event.sender_id, "vi")
             await event.reply(get_text("lang_switched", "vi"), parse_mode="html", buttons=get_main_keyboard("vi"))
         else:
             lang = state.config.get("LANGUAGE", "vi")
@@ -918,13 +922,14 @@ def register_bot_handlers(bot_client: TelegramClient):
         message = await event.reply(get_text("self_update_checking", lang), parse_mode="html")
         await handle_updatecheck(message)
 
-    @on(events.NewMessage(pattern=r"^/shell(?:@\w+)?(?:\s+([\s\S]+))?\s*$"))
+    @bot_client.on(events.NewMessage(pattern=r"^/shell(?:@\w+)?(?:\s+([\s\S]+))?\s*$"))
     async def shell_cmd(event):
         if not is_admin(event.sender_id) or not event.is_private or state.is_resetting: return
         lang = state.config.get("LANGUAGE", "vi")
         command = (event.pattern_match.group(1) or "").strip()
-        message = await event.reply(get_text("shell_running", lang), parse_mode="html")
-        await run_shell_message(command, message.edit, lang, runner=shell_runner, secret_values=config_secrets(state.config))
+        async def reply_result(text, parse_mode="html"):
+            await event.reply(text, parse_mode=parse_mode, silent=True)
+        await run_shell_message(command, reply_result, lang, runner=shell_runner, secret_values=config_secrets(state.config))
 
     @on(events.NewMessage(pattern=r"^/(afk|on|ping)(?:@\w+)?(?:\s+([\s\S]+))?\s*$"))
     async def presence_cmd(event):
@@ -1640,12 +1645,14 @@ def register_bot_handlers(bot_client: TelegramClient):
         elif data == "set_lang_vi":
             state.update_config({"LANGUAGE": "vi"})
             state.trigger_update()
+            await register_helper_commands(bot_client, event.sender_id, "vi")
             await event.answer(get_text("lang_switched", "vi"), alert=True)
             await event.edit(format_dashboard("vi"), parse_mode="html", buttons=get_main_keyboard("vi"))
 
         elif data == "set_lang_en":
             state.update_config({"LANGUAGE": "en"})
             state.trigger_update()
+            await register_helper_commands(bot_client, event.sender_id, "en")
             await event.answer(get_text("lang_switched", "en"), alert=True)
             await event.edit(format_dashboard("en"), parse_mode="html", buttons=get_main_keyboard("en"))
 
@@ -2027,6 +2034,7 @@ async def run_standalone_bot():
     try:
         await bot_client.start(bot_token=bot_token)
         me = await bot_client.get_me()
+        await register_helper_commands(bot_client, int(admin_id), state.config.get("LANGUAGE", "vi"))
         print(f"[✅] Helper Bot đang hoạt động: @{me.username} (ID: {me.id})")
         print(f"[ℹ️] ADMIN_ID được cấp phép: {admin_id}")
 

@@ -27,6 +27,9 @@ class BotAPISetupTests(unittest.IsolatedAsyncioTestCase):
         self.setup = bot_setup.BotAPISetup(Mock(), "fake-bot-token", "42")
         self.setup.call = AsyncMock(return_value={})
         self.setup.validate_api = AsyncMock()
+        menu_patch = patch.object(bot_setup.BotAPISetup, "register_commands", new=AsyncMock(return_value=True))
+        menu_patch.start()
+        self.addCleanup(menu_patch.stop)
         self.hash = "a" * 32
         config_patch = patch.dict(bot_setup.state.config, {
             "ADMIN_ID": "42", "BOT_TOKEN": "fake-bot-token", "API_ID": "", "API_HASH": "", "LANGUAGE": "vi",

@@ -109,7 +109,9 @@ class AdminToolsTests(unittest.IsolatedAsyncioTestCase):
         await handler(event)
         self.assertEqual(self.runner.run.call_args.args[0], "ls -la | head")
         self.assertIn("private-bot-token", self.runner.run.call_args.kwargs["secret_values"])
-        self.assertIn("up 1 day", self.message.edit.call_args.args[0])
+        self.assertIn("up 1 day", event.reply.call_args.args[0])
+        event.reply.assert_awaited_once()
+        self.message.edit.assert_not_awaited()
 
     async def test_shell_command_is_admin_private_only(self):
         handler, builder = self.client.handlers["shell_cmd"]
@@ -134,7 +136,8 @@ class AdminToolsTests(unittest.IsolatedAsyncioTestCase):
         event = self.event("/shell uptime")
         event.pattern_match = builder.pattern(event.raw_text)
         await handler(event)
-        self.assertIn("chỉ hoạt động trên Linux", self.message.edit.call_args.args[0])
+        self.assertIn("chỉ hoạt động trên Linux", event.reply.call_args.args[0])
+        self.message.edit.assert_not_awaited()
 
     async def test_shell_is_not_mistaken_for_pending_name_input(self):
         self.helper.user_sessions[42] = {"action": "input_name"}
@@ -195,12 +198,15 @@ class AdminToolsTests(unittest.IsolatedAsyncioTestCase):
         setup = self.setup_bot()
         setup.action = "api_hash"
         setup.api_id = "123"
+        setup.panel_message_id = 55
         await setup.handle({"message": {
             "date": setup.started_at, "from": {"id": 42}, "chat": {"id": 42, "type": "private"}, "text": "/shell fastfetch",
         }})
         self.assertEqual(self.runner.run.call_args.args[0], "fastfetch")
         self.assertEqual(setup.action, "api_hash")
-        self.assertTrue(any(call.args[0] == "editMessageText" for call in setup.call.call_args_list))
+        self.assertEqual([call.args[0] for call in setup.call.call_args_list], ["sendMessage"])
+        self.assertEqual(setup.panel_message_id, 55)
+        self.assertIn("up 1 day", setup.call.call_args.kwargs["text"])
 
     async def test_bootstrap_shell_rejects_non_admin_and_groups(self):
         setup = self.setup_bot()
@@ -209,6 +215,20 @@ class AdminToolsTests(unittest.IsolatedAsyncioTestCase):
                 "date": setup.started_at, "from": {"id": sender}, "chat": {"id": 42, "type": kind}, "text": "/shell ls",
             }})
         self.runner.run.assert_not_awaited()
+
+    async def test_bootstrap_shell_results_keep_history_and_reply_to_their_command(self):
+        setup = self.setup_bot()
+        setup.panel_message_id = 55
+        for message_id in (101, 102):
+            await setup.handle({"message": {
+                "message_id": message_id, "date": setup.started_at, "from": {"id": 42},
+                "chat": {"id": 42, "type": "private"}, "text": "/shell pwd",
+            }})
+        calls = setup.call.call_args_list
+        self.assertEqual([call.args[0] for call in calls], ["sendMessage", "sendMessage"])
+        self.assertEqual([call.kwargs["reply_parameters"]["message_id"] for call in calls], [101, 102])
+        self.assertTrue(all(call.kwargs["disable_notification"] for call in calls))
+        self.assertEqual(setup.panel_message_id, 55)
 
 
 if __name__ == "__main__":

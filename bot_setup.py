@@ -14,6 +14,7 @@ from reset_control import reset_requests, reset_notice, reset_buttons, apply_con
 from i18n import get_text
 from shell_commands import shell_runner, run_shell_message, config_secrets
 from presence import ping_message
+from bot_commands import command_menu
 
 
 API_ERROR_HINTS = {
@@ -69,6 +70,17 @@ class BotAPISetup:
 
     def text(self, vi, en):
         return en if state.config.get("LANGUAGE") == "en" else vi
+
+    async def register_commands(self):
+        try:
+            await self.call(
+                "setMyCommands", commands=command_menu(state.config.get("LANGUAGE", "vi"), bootstrap=True),
+                scope={"type": "chat", "chat_id": self.admin_id}, language_code="",
+            )
+            return True
+        except Exception as exc:
+            print(f"[ℹ️] Chưa đồng bộ gợi ý lệnh ({type(exc).__name__}); gửi /start để thử lại.")
+            return False
 
     async def call(self, method, **payload):
         url = f"https://api.telegram.org/bot{self.token}/{method}"
@@ -201,6 +213,7 @@ class BotAPISetup:
                 self.api_id = ""
                 if data in ("bootstrap_vi", "bootstrap_en"):
                     state.update_config({"LANGUAGE": data.rsplit("_", 1)[1]})
+                    await self.register_commands()
                 await self.show_menu()
             return False
 
@@ -226,15 +239,19 @@ class BotAPISetup:
         if command == "/shell":
             parts = text.split(maxsplit=1)
             lang = state.config.get("LANGUAGE", "vi")
-            await self.send(get_text("shell_running", lang))
-            async def edit_shell(text, parse_mode="html"):
-                await self.send(text)
-            await run_shell_message(parts[1] if len(parts) > 1 else "", edit_shell, lang, runner=shell_runner, secret_values=config_secrets(state.config))
+            async def reply_shell(text, parse_mode="html"):
+                payload = {"chat_id": self.admin_id, "text": text, "parse_mode": "HTML", "disable_notification": True}
+                if isinstance(message.get("message_id"), int):
+                    payload["reply_parameters"] = {"message_id": message["message_id"], "allow_sending_without_reply": True}
+                await self.call("sendMessage", **payload)
+            await run_shell_message(parts[1] if len(parts) > 1 else "", reply_shell, lang, runner=shell_runner, secret_values=config_secrets(state.config))
             return False
         if command == "/reset":
             await self.offer_reset()
             return False
         if command in ("/start", "/home", "/setup", "/cancel"):
+            if command == "/start":
+                await self.register_commands()
             update_requests.cancel(self.admin_id)
             self.action = None
             self.api_id = ""
@@ -311,6 +328,7 @@ async def run_api_setup(token, admin_id):
             if webhook.get("url"):
                 print("[❌] Bot đang có webhook. Tắt webhook ở dịch vụ cũ trước khi chạy chế độ cài đặt này.")
                 return False
+            await setup.register_commands()
             print(f"[🛠] Mở https://t.me/{me['username']} và /start bằng tài khoản ADMIN_ID={admin_id}.")
             try:
                 await setup.show_menu()

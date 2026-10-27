@@ -1,3 +1,4 @@
+import asyncio
 import importlib.util
 import unittest
 from types import SimpleNamespace
@@ -242,6 +243,50 @@ class HelperPanelHandlerTests(unittest.IsolatedAsyncioTestCase):
         await self.run_handler("callback_handler", callback)
         self.assertEqual(self.message.edit.call_args.args[0], "Second page")
         callback.respond.assert_not_awaited()
+
+    async def test_shell_results_are_separate_and_never_replace_or_join_the_panel(self):
+        from shell_commands import ShellResult
+        await self.run_handler("start_cmd", self.event("/start"))
+        generation = self.panels.chats[42]["generation"]
+        runner = SimpleNamespace(run=AsyncMock(return_value=ShellResult("pwd", "/termux/tg-name", 0)))
+        shell_message = SimpleNamespace(edit=AsyncMock())
+        with patch.object(self.helper, "shell_runner", runner):
+            first = self.event("/shell pwd")
+            first.reply.return_value = shell_message
+            await self.run_handler("shell_cmd", first)
+            first.reply.assert_awaited_once()
+            self.assertIn("/termux/tg-name", first.reply.call_args.args[0])
+            self.assertTrue(first.reply.call_args.kwargs["silent"])
+            self.assertEqual(self.panels.chats[42]["generation"], generation)
+            self.message.edit.assert_not_awaited()
+            await self.run_handler("callback_handler", self.event(data="main_menu"))
+            self.message.edit.assert_awaited_once()
+            second = self.event("/shell pwd")
+            await self.run_handler("shell_cmd", second)
+            second.reply.assert_awaited_once()
+            self.message.edit.assert_awaited_once()
+            shell_message.edit.assert_not_awaited()
+
+    async def test_long_shell_still_delivers_a_new_result_after_returning_home(self):
+        from shell_commands import ShellResult
+        started, finish = asyncio.Event(), asyncio.Event()
+        async def run(*args, **kwargs):
+            started.set()
+            await finish.wait()
+            return ShellResult("pwd", "late output", 0)
+        await self.run_handler("start_cmd", self.event("/start"))
+        shell_event = self.event("/shell pwd")
+        with patch.object(self.helper, "shell_runner", SimpleNamespace(run=AsyncMock(side_effect=run))):
+            task = asyncio.create_task(self.run_handler("shell_cmd", shell_event))
+            try:
+                await started.wait()
+                await self.run_handler("callback_handler", self.event(data="main_menu"))
+            finally:
+                finish.set()
+                await task
+        self.assertIn("late output", shell_event.reply.call_args.args[0])
+        shell_event.reply.assert_awaited_once()
+        self.message.edit.assert_awaited_once()
 
 
 if __name__ == "__main__":

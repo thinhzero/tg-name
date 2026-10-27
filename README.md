@@ -259,10 +259,18 @@ Helper Bot nhận `/afk`, `/on`, `/ping` từ admin; bật AFK cần Userbot đa
 
 ### Helper Bot ít thông báo
 
-Menu, wizard nhập cấu hình, xem trước, kết quả `/shell` và tiến trình cập nhật ưu tiên **sửa
+Menu, wizard nhập cấu hình, xem trước và tiến trình cập nhật ưu tiên **sửa
 cùng một tin nhắn của bot**. Tin đầu tiên, hoặc khi tin cũ đã bị xóa/không sửa được, được gửi
 mới ở chế độ im lặng. Sau khi restart bot có thể tạo một panel mới; không sửa tin của bạn.
 Danh sách random dài có nút chuyển trang thay vì đẩy nhiều tin nối tiếp.
+
+Riêng **`/shell` trả một tin kết quả mới cho mỗi lần gọi**, không sửa panel hay kết quả lệnh
+trước đó. Kết quả gửi im lặng, vẫn giữ lịch sử từng lệnh, kể cả khi bạn đã quay về Home.
+
+Gõ **`/`** trong chat riêng với bot để xem danh sách lệnh và mô tả. Bot tự đăng ký gợi ý cho
+đúng chat `ADMIN_ID` khi khởi động, gửi `/start` và khi đổi ngôn ngữ. Trước bước nhập API,
+menu chỉ hiện các lệnh đã dùng được trong chế độ khởi tạo. Nếu Telegram chưa cập nhật danh
+sách ngay, mở lại chat hoặc gửi `/start`; gợi ý không thay đổi quyền admin của các lệnh.
 
 Mỗi màn hình có **🏠 Home**; bấm để hủy bước nhập đang chờ, đóng phiên đăng nhập tạm và về
 bảng điều khiển. `/home` hoặc `/start` cũng mở lại giao diện. Tin chứa OTP/API hash/mật khẩu

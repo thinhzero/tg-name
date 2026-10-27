@@ -164,7 +164,7 @@ def format_shell_result(result, lang="vi"):
 shell_runner = ShellRunner()
 
 
-async def run_shell_message(command, edit, lang="vi", runner=shell_runner, secret_values=()):
+async def run_shell_message(command, respond, lang="vi", runner=shell_runner, secret_values=()):
     try:
         result = await runner.run(command, secret_values=secret_values)
         message = format_shell_result(result, lang)
@@ -172,4 +172,4 @@ async def run_shell_message(command, edit, lang="vi", runner=shell_runner, secre
         message = get_text(exc.key, lang)
     except Exception:
         message = get_text("shell_failed", lang)
-    await edit(message, parse_mode="html")
+    await respond(message, parse_mode="html")
