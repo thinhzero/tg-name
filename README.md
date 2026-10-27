@@ -134,8 +134,10 @@ Sau khi tiến trình đã chạy:
 
 Ở bước thiếu API, bot dùng **Telegram Bot API** chỉ bằng token; sau khi có API riêng mới
 khởi chạy Helper Bot/Userbot bằng Telethon. Không cần key công khai ghi cứng.
-Bot cố xóa tin nhắn chứa API hash, OTP và 2FA sau khi xử lý; việc xóa có thể thất bại do
-quyền/mạng và không thay thế bảo mật tài khoản. Chỉ dùng bot do chính bạn vận hành.
+Bot cố xóa tin nhắn chứa API_ID, API hash, OTP và 2FA sau khi xử lý, kể cả API nhập sai;
+không hiện lại API_ID/API_HASH trong xác nhận hay cài đặt, không xóa giá trị đã lưu trong `.env`.
+Việc xóa có thể thất bại do quyền/mạng và không thay thế bảo mật tài khoản.
+Chỉ dùng bot do chính bạn vận hành.
 Nếu bot đã gắn webhook ở dịch vụ khác, hãy dừng dịch vụ/gỡ webhook đó trước; không chạy
 nhiều tiến trình cùng token.
 
@@ -215,7 +217,7 @@ Helper Bot chỉ nhận lệnh trong **chat riêng**, từ `ADMIN_ID` đã cấu
 | Xem trước tên và bio | `.preview` | `/preview` |
 | Cập nhật tên/bio ngay | `.update` | `/update` |
 | Tạm dừng / tiếp tục | `.pause` / `.resume` | `/pause` / `/resume` |
-| Vắng mặt / trở lại | `.afk [lý do]` / `.on` | `/afk [lý do]` / `/on` |
+| Vắng mặt / trở lại | `.afk [thời gian] [lý do]` / `.on` | `/afk [thời gian] [lý do]` / `/on` |
 | Ping và uptime | `.ping [host]` | `/ping [host]` |
 | Về Home nhanh | — | `/home` hoặc nút **🏠 Home** |
 | Đổi tên cố định | `.name tên mới` | `/setname tên mới` |
@@ -241,6 +243,8 @@ nhạy cảm sau khi hoàn tất. Không gửi token/API key trong nhóm hoặc 
 
 ```text
 .afk đi ngủ
+.afk 30s đi ngủ
+.afk 30 đi ngủ
 .on
 .ping
 .ping example.com
@@ -248,8 +252,12 @@ nhạy cảm sau khi hoàn tất. Không gửi token/API key trong nhóm hoặc 
 
 `.afk` bật vắng mặt: khi có người mention hoặc reply tin của bạn, Userbot trả lý do và thời
 gian AFK. Mỗi người trong mỗi chat được trả lời tối đa một lần mỗi 60 giây; tin trả lời
-gửi im lặng và cố tự xóa sau 5 giây. Tin thường không mention/reply, tin từ bot và tin của chính
-bạn không kích hoạt. `.on` tắt AFK và xóa chính tin lệnh; không đổi trạng thái online Telegram.
+gửi im lặng và cố tự xóa sau **10 giây mặc định**. Có thể đặt thời gian đứng trước lý do:
+`.afk 30s đi ngủ` hoặc `.afk 30 đi ngủ` xóa tin tự trả lời sau 30 giây; `/afk` dùng cùng cú pháp.
+Nhận số giây hoặc đơn vị `s`/`m`/`h`, từ 1 giây đến 24 giờ. Đây là thời gian xóa **tin tự trả
+lời AFK**, không phải thời gian tắt AFK hay xóa tin lệnh của bạn.
+Tin thường không mention/reply, tin từ bot và tin của chính bạn không kích hoạt.
+`.on` tắt AFK và xóa chính tin lệnh; không đổi trạng thái online Telegram.
 AFK chỉ lưu trong lần chạy hiện tại, không tự thay tên/bio hay tạm dừng Profile Updater.
 
 `.ping` sửa chính tin lệnh để hiện độ trễ gửi/sửa tin qua Telegram và uptime của tiến trình.
@@ -273,7 +281,7 @@ menu chỉ hiện các lệnh đã dùng được trong chế độ khởi tạo
 sách ngay, mở lại chat hoặc gửi `/start`; gợi ý không thay đổi quyền admin của các lệnh.
 
 Mỗi màn hình có **🏠 Home**; bấm để hủy bước nhập đang chờ, đóng phiên đăng nhập tạm và về
-bảng điều khiển. `/home` hoặc `/start` cũng mở lại giao diện. Tin chứa OTP/API hash/mật khẩu
+bảng điều khiển. `/home` hoặc `/start` cũng mở lại giao diện. Tin chứa API_ID/API hash/OTP/mật khẩu
 vẫn được cố xóa riêng; kết quả tác vụ cũ không ghi đè màn hình Home vừa mở.
 
 ### Nút cập nhật và lệnh Linux / Termux
@@ -282,6 +290,13 @@ Bấm **🔎 Kiểm tra cập nhật** ở menu chính hoặc **Cài đặt**: h
 Có bản mới thì báo **số commit mới hơn** và hỏi **✅ Có, cập nhật / ❌ Không**. Chưa bấm Có
 thì không clone, cài thư viện, tạo snapshot hay thay code; đã mới nhất thì chỉ báo commit.
 Nút này và `/updatecheck` cũng có ở màn hình khởi tạo khi chưa nhập API.
+
+Sau khi bản mới **khởi động lại và kết nối Telegram thành công**, bot gửi tin riêng
+**“✅ Đã cập nhật xong!”**, kèm commit và đường dẫn snapshot. Nếu chưa gửi được (mạng, chưa
+nhấn Start...), trạng thái được giữ để thử lại khi gửi `/start` hoặc khởi động lại; gửi thành
+công thì không lặp ở lần `/start` sau. Cập nhật qua Userbot báo trong Saved Messages.
+`.update-status/` chỉ lưu metadata commit/snapshot và nơi nhận, không lưu API/token/session;
+thư mục này được Git ignore và không đưa vào snapshot.
 
 Trên Linux hoặc Termux, admin nhắn riêng với bot:
 

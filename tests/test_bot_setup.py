@@ -27,6 +27,9 @@ class BotAPISetupTests(unittest.IsolatedAsyncioTestCase):
         self.setup = bot_setup.BotAPISetup(Mock(), "fake-bot-token", "42")
         self.setup.call = AsyncMock(return_value={})
         self.setup.validate_api = AsyncMock()
+        notice_patch = patch.object(bot_setup, "notify_update_completed", new=AsyncMock(return_value=False))
+        notice_patch.start()
+        self.addCleanup(notice_patch.stop)
         menu_patch = patch.object(bot_setup.BotAPISetup, "register_commands", new=AsyncMock(return_value=True))
         menu_patch.start()
         self.addCleanup(menu_patch.stop)
@@ -81,13 +84,37 @@ class BotAPISetupTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(self.setup.action, "api_hash")
         self.assertEqual(self.setup.api_id, "123")
         self.save.assert_not_called()
+        self.setup.call.assert_any_await("deleteMessage", chat_id=42, message_id=99)
 
     async def test_invalid_api_id_is_rejected(self):
         await self.setup.handle(self.callback())
         for value in ("0", "-12", "abc", "2147483648", "9" * 100):
+            self.setup.call.reset_mock()
             await self.setup.handle(self.message(value))
             self.assertEqual(self.setup.action, "api_id")
+            self.setup.call.assert_any_await("deleteMessage", chat_id=42, message_id=99)
         self.save.assert_not_called()
+
+    async def test_api_id_deletion_failure_does_not_stop_setup(self):
+        await self.setup.handle(self.callback())
+        async def call(method, **payload):
+            if method == "deleteMessage":
+                raise self.module.BotSetupError(400, method=method)
+            return {}
+        self.setup.call.side_effect = call
+        await self.setup.handle(self.message("123"))
+        self.assertEqual(self.setup.api_id, "123")
+        self.assertEqual(self.setup.action, "api_hash")
+        self.assertTrue(await self.setup.handle(self.message(self.hash)))
+        self.save.assert_called_once_with({"API_ID": "123", "API_HASH": self.hash})
+
+    async def test_navigation_commands_are_not_deleted_while_waiting_for_api(self):
+        for action in ("api_id", "api_hash"):
+            for command in ("/home", "/cancel", "/start", "/setup", "/unsupported"):
+                self.setup.action = action
+                self.setup.call.reset_mock()
+                await self.setup.handle(self.message(command))
+                self.assertNotIn("deleteMessage", [call.args[0] for call in self.setup.call.call_args_list])
 
     async def test_invalid_hash_is_deleted_and_retried(self):
         await self.enter_id()
@@ -458,6 +485,7 @@ class HelperOnboardingTests(unittest.IsolatedAsyncioTestCase):
             patch.object(helper_bot, "engine", self.engine),
             patch.object(helper_bot.state, "update_config", self.save),
             patch.object(helper_bot.state, "reload_config"),
+            patch.object(helper_bot, "notify_update_completed", new=AsyncMock(return_value=False)),
         ):
             patcher.start()
             self.addCleanup(patcher.stop)

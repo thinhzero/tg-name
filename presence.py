@@ -12,6 +12,24 @@ from shell_commands import clipped_html
 
 
 STARTED_AT = time.monotonic()
+DEFAULT_AFK_DELETE_AFTER = 10
+
+
+def parse_afk_args(argument):
+    """[thời gian tự xóa] [lý do]; số không có đơn vị được hiểu là giây."""
+    parts = argument.strip().split(maxsplit=1)
+    if not parts:
+        return DEFAULT_AFK_DELETE_AFTER, ""
+    token = parts[0]
+    match = re.fullmatch(r"([0-9]{1,6})([smh]?)", token, re.IGNORECASE)
+    if match:
+        seconds = int(match[1]) * {"": 1, "s": 1, "m": 60, "h": 3600}[match[2].lower()]
+        if not 1 <= seconds <= 86400:
+            raise ValueError("AFK deletion time must be between 1 second and 24 hours")
+        return seconds, parts[1].strip() if len(parts) > 1 else ""
+    if re.fullmatch(r"[+-]?[0-9]+(?:\.[0-9]+)?[smh]?", token, re.IGNORECASE):
+        raise ValueError("Invalid AFK deletion time")
+    return DEFAULT_AFK_DELETE_AFTER, argument.strip()
 
 
 def elapsed(seconds):
@@ -23,7 +41,7 @@ def elapsed(seconds):
 
 
 class Presence:
-    def __init__(self, cooldown=60, delete_after=5):
+    def __init__(self, cooldown=60, delete_after=DEFAULT_AFK_DELETE_AFTER):
         self.since = None
         self.reason = ""
         self.cooldown = cooldown
@@ -35,7 +53,9 @@ class Presence:
     def active(self):
         return self.since is not None
 
-    def enable(self, reason=""):
+    def enable(self, reason="", *, delete_after=None):
+        if delete_after is not None:
+            self.delete_after = delete_after
         self.since = time.monotonic()
         self.reason = reason[:500].strip()
         self.replies.clear()
@@ -50,6 +70,7 @@ class Presence:
             "afk_reply" if name is not None else "afk_enabled", lang,
             name=escape(name or ""), reason=escape(self.reason or get_text("afk_no_reason", lang)),
             duration=elapsed(time.monotonic() - self.since) if self.active else elapsed(0),
+            delete_after=self.delete_after,
         )
 
     async def incoming(self, event, owner_id, name, lang="vi"):
@@ -82,6 +103,7 @@ class Presence:
         while len(self.replies) > 1024:
             self.replies.popitem(last=False)
         try:
+            delete_after = self.delete_after
             message = await event.reply(self.notice(lang, name), parse_mode="html", silent=True)
         except Exception:
             return
@@ -91,13 +113,13 @@ class Presence:
             except Exception:
                 pass
             return
-        task = asyncio.create_task(self._delete_later(message))
+        task = asyncio.create_task(self._delete_later(message, delete_after))
         self.tasks.add(task)
         task.add_done_callback(self.tasks.discard)
 
-    async def _delete_later(self, message):
+    async def _delete_later(self, message, delete_after):
         try:
-            await asyncio.sleep(self.delete_after)
+            await asyncio.sleep(delete_after)
             await message.delete()
         except Exception:
             pass

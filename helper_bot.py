@@ -35,13 +35,13 @@ from telethon.errors import (
 from updater_state import state, DEFAULT_NAME_FORMAT
 from profile_engine import engine, generate_preview, get_lastfm_track
 from i18n import get_text
-from bot_updater import bot_updater, run_with_restart, run_update_check, run_update_action, update_requests
+from bot_updater import bot_updater, run_with_restart, run_update_check, run_update_action, update_requests, notify_update_completed
 from random_names import random_names
 from bot_setup import run_api_setup
 from reset_control import reset_requests, reset_notice, reset_buttons, apply_config_reset, cleanup_reset_sessions
 from shell_commands import shell_runner, run_shell_message, config_secrets
 from helper_panel import HelperPanels
-from presence import presence, ping_message
+from presence import presence, ping_message, parse_afk_args
 from bot_commands import register_helper_commands
 
 # Lưu trạng thái đàm thoại của user: user_id -> {"action": ..., "data": ...}
@@ -163,7 +163,7 @@ def format_setup_guide(lang=None):
             "Choose <b>Telegram login</b>, then send your phone number, login code and 2FA password if required. "
             "The session is saved automatically; ADMIN_ID stays the value from .env.\n"
             "Next choose your name, timezone and format with the buttons.\n\n"
-            "API hash, login code and password messages are deleted on a best-effort basis. "
+            "API_ID, API hash, login code and password messages are deleted on a best-effort basis. "
             "Only log in to this bot on a machine you control. Use /cancel to cancel, /setup to reopen this guide."
         )
     return (
@@ -174,7 +174,7 @@ def format_setup_guide(lang=None):
         "Bấm <b>Đăng nhập Telegram</b>, nhập số điện thoại, mã xác nhận và mật khẩu 2FA nếu có. "
         "Bot tự lưu session; ADMIN_ID vẫn giữ đúng giá trị trong .env.\n"
         "Sau đó chọn tên, múi giờ và mẫu hiển thị bằng các nút bên dưới.\n\n"
-        "Bot cố xóa tin nhắn API hash, mã đăng nhập và mật khẩu sau khi xử lý. "
+        "Bot cố xóa tin nhắn API_ID, API hash, mã đăng nhập và mật khẩu sau khi xử lý. "
         "Chỉ đăng nhập vào bot chạy trên máy bạn kiểm soát. /cancel để hủy, /setup để mở lại hướng dẫn."
     )
 
@@ -380,7 +380,7 @@ def format_settings_text(lang: str = None):
             f"⚙️ <b>SYSTEM CONFIGURATION & SETTINGS</b>\n"
             f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
             f"• <b>Telegram Account:</b> {has_sess}\n"
-            f"• <b>API_ID:</b> <code>{state.config.get('API_ID')}</code>\n"
+            f"• <b>API_ID:</b> {secret_status(state.config.get('API_ID'), lang)}\n"
             f"• <b>API_HASH:</b> {secret_status(state.config.get('API_HASH'), lang)}\n"
             f"• <b>Fixed Name (BASE_NAME):</b> <code>{state.config.get('BASE_NAME')}</code>\n"
             f"• <b>Last.fm Username:</b> <code>{lastfm_user}</code>\n"
@@ -400,7 +400,7 @@ def format_settings_text(lang: str = None):
             f"⚙️ <b>CÀI ĐẶT & CẤU HÌNH HỆ THỐNG</b>\n"
             f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
             f"• <b>Tài khoản Telegram:</b> {has_sess}\n"
-            f"• <b>API_ID:</b> <code>{state.config.get('API_ID')}</code>\n"
+            f"• <b>API_ID:</b> {secret_status(state.config.get('API_ID'), lang)}\n"
             f"• <b>API_HASH:</b> {secret_status(state.config.get('API_HASH'), lang)}\n"
             f"• <b>Tên hiển thị cố định:</b> <code>{state.config.get('BASE_NAME')}</code>\n"
             f"• <b>Tài khoản Last.fm:</b> <code>{lastfm_user}</code>\n"
@@ -618,7 +618,7 @@ def format_help(lang="vi", helper=False):
             f"• <code>{p}update</code>: update name/bio now.\n"
             f"• <code>{p}updatecheck</code>: compare GitHub commits; asks before updating CODE.\n"
             f"• <code>{p}status</code>, <code>{p}pause</code>, <code>{p}resume</code>\n"
-            f"• <code>{p}afk [reason]</code>, <code>{p}on</code>: away / back online.\n"
+            f"• <code>{p}afk [10s] [reason]</code>, <code>{p}on</code>: away / back; replies auto-delete (default 10s).\n"
             f"• <code>{p}ping [host]</code>: Telegram latency + uptime; optional system ping.\n"
             f"{settings_help}"
             f"• <code>{p}bioformat {{weather_short}} ⏰ HH:mm</code>: change bio.\n"
@@ -642,7 +642,7 @@ def format_help(lang="vi", helper=False):
         f"• <code>{p}update</code>: đổi tên/bio ngay.\n"
         f"• <code>{p}updatecheck</code>: đếm commit GitHub; hỏi trước khi cập nhật CODE.\n"
         f"• <code>{p}status</code>, <code>{p}pause</code>, <code>{p}resume</code>\n"
-        f"• <code>{p}afk [lý do]</code>, <code>{p}on</code>: bật / tắt vắng mặt.\n"
+        f"• <code>{p}afk [10s] [lý do]</code>, <code>{p}on</code>: bật / tắt vắng mặt; tự xóa trả lời (mặc định 10s).\n"
         f"• <code>{p}ping [host]</code>: độ trễ Telegram + uptime; có host thì ping hệ thống.\n"
         f"{settings_help}"
         f"• <code>{p}bioformat {{weather_short}} ⏰ HH:mm</code>: đổi mẫu bio.\n"
@@ -664,7 +664,12 @@ def register_userbot_handlers(client: TelegramClient):
         cur_lang = state.config.get("LANGUAGE", "vi")
 
         if cmd == "afk":
-            presence.enable(arg)
+            try:
+                delete_after, reason = parse_afk_args(arg)
+            except ValueError:
+                await event.edit(get_text("afk_usage", cur_lang), parse_mode="html")
+                return
+            presence.enable(reason, delete_after=delete_after)
             await event.edit(presence.notice(cur_lang), parse_mode="html")
 
         elif cmd == "on":
@@ -847,6 +852,10 @@ def register_bot_handlers(bot_client: TelegramClient):
         else:
             await event.reply(format_dashboard(lang), parse_mode="html", buttons=get_main_keyboard(lang))
 
+        async def send_completed(text, parse_mode="html"):
+            await bot_client.send_message(event.sender_id, text, parse_mode=parse_mode)
+        await notify_update_completed(send_completed, event.sender_id, lang)
+
     @on(events.NewMessage(pattern=r"^/setup(?:@\w+)?\s*$"))
     async def setup_cmd(event):
         if not is_admin(event.sender_id): return
@@ -945,7 +954,12 @@ def register_bot_handlers(bot_client: TelegramClient):
         elif not engine.is_running:
             await event.reply(get_text("afk_login_required", lang), parse_mode="html")
         else:
-            presence.enable(arg)
+            try:
+                delete_after, reason = parse_afk_args(arg)
+            except ValueError:
+                await event.reply(get_text("afk_usage", lang), parse_mode="html")
+                return
+            presence.enable(reason, delete_after=delete_after)
             await event.reply(presence.notice(lang), parse_mode="html")
 
     @on(events.NewMessage(pattern=r"^/(updaterandom|lsrandom|rmrandom)(?:@\w+)?(?:\s+([\s\S]+))?$"))
@@ -1202,10 +1216,14 @@ def register_bot_handlers(bot_client: TelegramClient):
     async def user_input_handler(event):
         if not is_admin(event.sender_id): return
         action = user_sessions.get(event.sender_id, {}).get("action")
+        sensitive = action in ("input_api_id", "input_api_hash", "input_weather_api", "input_lastfm_key", "login_wait_phone", "login_wait_code", "login_wait_password")
+        # Lệnh điều hướng không phải dữ liệu API/OTP và không được xóa như dữ liệu nhập.
+        if sensitive and event.raw_text.lstrip().startswith("/"):
+            return
         try:
             await _user_input_handler_impl(event)
         finally:
-            if action in ("input_api_hash", "input_weather_api", "input_lastfm_key", "login_wait_phone", "login_wait_code", "login_wait_password"):
+            if sensitive:
                 try:
                     await event.delete()
                 except Exception:
@@ -1333,7 +1351,7 @@ def register_bot_handlers(bot_client: TelegramClient):
 
         # 5. Đổi API_ID & HASH
         elif action == "input_api_id":
-            if not text.isdigit() or not 0 < int(text) <= 2147483647:
+            if not re.fullmatch(r"[1-9][0-9]{0,9}", text) or int(text) > 2147483647:
                 warn = "⚠️ <b>API_ID must be digits.</b> Please re-enter (or /cancel):" if lang == "en" else "⚠️ <b>API_ID phải là chữ số.</b> Vui lòng nhập lại (hoặc /cancel):"
                 await event.reply(warn, parse_mode="html")
                 return
@@ -1349,7 +1367,7 @@ def register_bot_handlers(bot_client: TelegramClient):
             api_id = sess.get("api_id")
             user_sessions.pop(event.sender_id, None)
             state.update_config({"API_ID": api_id, "API_HASH": text})
-            ack = f"✅ Saved <b>API_ID</b>: <code>{api_id}</code> and <b>API_HASH</b>!" if lang == "en" else f"✅ Đã lưu <b>API_ID</b>: <code>{api_id}</code> và <b>API_HASH</b>!"
+            ack = "✅ Saved <b>API_ID</b> and <b>API_HASH</b> (hidden)." if lang == "en" else "✅ Đã lưu <b>API_ID</b> và <b>API_HASH</b> (ẩn)."
             await event.reply(ack, parse_mode="html", buttons=get_settings_keyboard(lang))
 
         # 6. Sửa định dạng Format
@@ -1832,7 +1850,7 @@ def register_bot_handlers(bot_client: TelegramClient):
                 msg = (
                     "🆔 <b>CONFIGURE TELEGRAM API_ID & API_HASH</b>\n"
                     "Get from https://my.telegram.org\n\n"
-                    f"• Current API_ID: <code>{state.config.get('API_ID')}</code>\n"
+                    f"• API_ID: {secret_status(state.config.get('API_ID'), lang)}\n"
                     f"• API_HASH: {secret_status(state.config.get('API_HASH'), lang)}\n\n"
                     "👉 <b>Step 1/2: Enter your new API_ID:</b>"
                 )
@@ -1840,7 +1858,7 @@ def register_bot_handlers(bot_client: TelegramClient):
                 msg = (
                     "🆔 <b>CẤU HÌNH TELEGRAM API_ID & API_HASH</b>\n"
                     "Lấy tại https://my.telegram.org\n\n"
-                    f"• API_ID hiện tại: <code>{state.config.get('API_ID')}</code>\n"
+                    f"• API_ID: {secret_status(state.config.get('API_ID'), lang)}\n"
                     f"• API_HASH: {secret_status(state.config.get('API_HASH'), lang)}\n\n"
                     "👉 <b>Bước 1/2: Nhập API_ID mới:</b>"
                 )
@@ -2053,6 +2071,10 @@ async def run_standalone_bot():
                 panels.remember(int(admin_id), message)
             except Exception:
                 print("[ℹ️] Hãy mở chat riêng với Helper Bot và nhấn Start / gửi /setup để tiếp tục.")
+
+        async def send_completed(text, parse_mode="html"):
+            await bot_client.send_message(int(admin_id), text, parse_mode=parse_mode)
+        await notify_update_completed(send_completed, int(admin_id), state.config.get("LANGUAGE", "vi"))
 
         print("\nNhấn Ctrl+C để dừng bot.")
         await bot_client.run_until_disconnected()

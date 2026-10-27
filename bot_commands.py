@@ -15,7 +15,7 @@ COMMANDS = (
     ("updatecheck", "Đếm commit GitHub, hỏi trước khi cập nhật", "Check GitHub commits; ask before updating"),
     ("shell", "Chạy lệnh Linux/Termux, VD: /shell ls -la", "Run Linux/Termux commands, e.g. /shell ls -la"),
     ("ping", "Độ trễ Telegram, uptime; có thể thêm host", "Telegram latency and uptime; optional host"),
-    ("afk", "Bật AFK: /afk lý do", "Enable AFK: /afk reason"),
+    ("afk", "Bật AFK: /afk [10s] [lý do]; tự xóa trả lời", "Enable AFK: /afk [10s] [reason]; auto-delete replies"),
     ("on", "Tắt AFK", "Disable AFK"),
     ("preview", "Xem trước tên và bio", "Preview name and bio"),
     ("previewbio", "Xem bio và giới hạn ký tự", "Preview bio and character limits"),

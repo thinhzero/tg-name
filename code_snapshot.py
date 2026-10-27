@@ -13,7 +13,7 @@ from shell_commands import SENSITIVE_NAME, config_secrets
 
 
 SNAPSHOT_DIR = "snapshots"
-EXCLUDED_DIRS = {".git", SNAPSHOT_DIR, ".venv", "venv", "env", "__pycache__", "node_modules", ".pytest_cache", ".ruff_cache"}
+EXCLUDED_DIRS = {".git", SNAPSHOT_DIR, ".update-status", ".venv", "venv", "env", "__pycache__", "node_modules", ".pytest_cache", ".ruff_cache"}
 SOURCE_SUFFIXES = {".py", ".pyi", ".sh", ".bash", ".js", ".jsx", ".ts", ".tsx", ".html", ".css", ".scss", ".c", ".h", ".cpp", ".hpp", ".rs", ".go", ".java", ".kt", ".rb", ".php", ".sql", ".json", ".toml", ".yaml", ".yml", ".ini", ".cfg", ".conf", ".md", ".txt", ".example", ".service"}
 CREDENTIAL_PATTERN = re.compile(r"(?:gh[pousr]_[A-Za-z0-9]{20,}|github_pat_[A-Za-z0-9_]{20,}|\b\d{6,12}:[A-Za-z0-9_-]{30,}\b|-----BEGIN (?:[A-Z]+ )?PRIVATE KEY-----)")
 

@@ -43,6 +43,12 @@ class CodeSnapshotTests(unittest.TestCase):
         self.assertEqual([path.relative_to(snapshot / "code").as_posix() for path in (snapshot / "code").rglob("*") if path.is_file()], ["name.py"])
         self.assertNotIn("private-value", (snapshot / "snapshot.json").read_text())
 
+    def test_completion_state_is_never_copied_even_if_given_explicitly(self):
+        self.write(".update-status/pending.json", '{"owner_id": 42}')
+        self.write(".update-status/nested.py", "private = True\n")
+        snapshot = self.snapshot([".update-status/pending.json", ".update-status/nested.py"])
+        self.assertFalse((snapshot / "code/.update-status").exists())
+
     def test_inline_python_api_and_session_literals_are_redacted(self):
         original = 'API_ID = 12345678\nAPI_HASH = "private-api-hash"\nconfig = {"BOT_TOKEN": "private-token", "SESSION_STRING": "private-session"}\nprint("giữ tên tiếng Việt")\n'
         self.write("config.py", original)

@@ -44,6 +44,7 @@ class UpdateConfirmationTests(unittest.IsolatedAsyncioTestCase):
         self.updater.update.assert_awaited_once()
         self.assertEqual(self.updater.update.call_args.kwargs["plan"], self.plan)
         self.assertEqual(self.updater.update.call_args.kwargs["secret_values"], ["private-key"])
+        self.assertEqual(self.updater.update.call_args.kwargs["notify"], {"owner_id": 42, "lang": "vi", "userbot": False})
         self.assertIn("snapshots/test", self.edit.call_args.args[0])
         self.updater.request_restart.assert_called_once()
         await run_update_action(self.edit, 42, token, updater=self.updater)
@@ -85,6 +86,11 @@ class UpdateConfirmationTests(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn("buttons", self.edit.call_args.kwargs)
         self.assertIn(".updateconfirm " + token, self.edit.call_args.args[0])
         self.assertIn(".updatecancel " + token, self.edit.call_args.args[0])
+
+    async def test_userbot_confirmation_records_saved_messages_destination(self):
+        token = await self.offer(userbot=True)
+        await run_update_action(self.edit, 42, token, "en", updater=self.updater, userbot=True)
+        self.assertEqual(self.updater.update.call_args.kwargs["notify"], {"owner_id": 42, "lang": "en", "userbot": True})
 
     async def test_latest_or_diverged_never_offers_apply(self):
         for plan in (UpdatePlan("same", "same"), UpdatePlan("local", "remote", ahead=2, local_ahead=1)):

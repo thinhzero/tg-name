@@ -16,6 +16,7 @@ from pathlib import Path
 
 from i18n import get_text
 from code_snapshot import SNAPSHOT_DIR, create_snapshot
+from update_completion import STATUS_DIR, UpdateCompletion
 
 
 REPO_URL = "https://github.com/thinhzero/tg-name.git"
@@ -90,6 +91,7 @@ class BotUpdater:
         self._lock = asyncio.Lock()
         self._restart_pending = False
         self.restart_event = asyncio.Event()
+        self.completion = UpdateCompletion(self.project_dir)
 
     @property
     def is_busy(self):
@@ -167,7 +169,7 @@ class BotUpdater:
             path = Path(filename)
             # Không bao giờ lấy cấu hình/dữ liệu cá nhân từ bản cập nhật.
             if (path.name in (".env", "name.txt") or ".session" in path.suffixes or ".session-" in path.name
-                    or SNAPSHOT_DIR in path.parts or (path.name.startswith(".env.") and path.name != ".env.example")):
+                    or SNAPSHOT_DIR in path.parts or STATUS_DIR in path.parts or (path.name.startswith(".env.") and path.name != ".env.example")):
                 raise UpdateError("self_update_unsafe_file", filename=filename)
             if path.suffix == ".py":
                 with tokenize.open(source / path) as handle:
@@ -197,7 +199,7 @@ class BotUpdater:
                 raise UpdateError("self_update_changed")
             return UpdatePlan(current, latest, ahead=int(counts[1]), local_ahead=int(counts[0]))
 
-    async def update(self, progress, *, plan=None, secret_values=()):
+    async def update(self, progress, *, plan=None, secret_values=(), notify=None):
         """Chỉ áp dụng đúng commit đã được người dùng xác nhận."""
         if self.is_busy:
             raise UpdateError("self_update_busy")
@@ -267,7 +269,13 @@ class BotUpdater:
                 await self._git("merge", "--ff-only", "--no-edit", "--no-overwrite-ignore", latest)
 
             self._restart_pending = True
-            return UpdateResult(current, latest, updated=True, snapshot=snapshot)
+            result = UpdateResult(current, latest, updated=True, snapshot=snapshot)
+            if notify is not None:
+                try:
+                    self.completion.record(result, notify)
+                except (OSError, ValueError) as exc:
+                    print(f"[ℹ️] Đã áp dụng code nhưng chưa lưu được thông báo restart ({type(exc).__name__}).")
+            return result
 
     def request_restart(self):
         self.restart_event.set()
@@ -320,7 +328,7 @@ async def run_update_action(edit, owner_id, token, lang="vi", updater=bot_update
         await edit(get_text(key, lang), parse_mode="html")
 
     try:
-        result = await updater.update(progress, plan=plan, secret_values=secret_values)
+        result = await updater.update(progress, plan=plan, secret_values=secret_values, notify={"owner_id": owner_id, "lang": lang, "userbot": userbot})
     except Exception as exc:
         await show_update_error(edit, exc, lang)
         return
@@ -331,6 +339,19 @@ async def run_update_action(edit, owner_id, token, lang="vi", updater=bot_update
         await edit(get_text("self_update_restarting", lang, old=result.current[:7], new=result.latest[:7], snapshot=escape(result.snapshot)), parse_mode="html")
     finally:
         updater.request_restart()
+
+
+async def notify_update_completed(send, owner_id, lang="vi", userbot=False, legacy=True, updater=bot_updater):
+    # HEAD đã đổi nhưng runtime cũ vẫn có thể nhận /start trong lúc chuẩn bị exec.
+    if getattr(updater, "_restart_pending", False):
+        return False
+    completion = getattr(updater, "completion", None)
+    if completion is None:
+        return False
+
+    async def current():
+        return (await updater._git("rev-parse", "HEAD")).stdout
+    return await completion.deliver(send, current, owner_id, lang, userbot, legacy)
 
 
 async def _run_until_restart(main):

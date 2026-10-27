@@ -153,6 +153,7 @@ class ResetAndSettingsHandlerTests(unittest.IsolatedAsyncioTestCase):
             patch.object(helper_bot, "bot_updater", self.updater),
             patch.object(helper_bot, "random_names", self.names),
             patch.object(helper_bot, "generate_preview", return_value=("Preview", "Bio")),
+            patch.object(helper_bot, "notify_update_completed", new=AsyncMock(return_value=False)),
             patch.dict(helper_bot.user_sessions, {}, clear=True),
             patch.dict(reset_control.reset_requests.pending, {}, clear=True),
             patch.object(reset_control, "pending_session_cleanup", set()),
@@ -287,6 +288,55 @@ class ResetAndSettingsHandlerTests(unittest.IsolatedAsyncioTestCase):
         await self.client.handlers["user_input_handler"](event)
         self.assertEqual(self.state.config["LASTFM_API_KEY"], "a" * 32)
         self.assertNotIn("a" * 32, str(event.reply.call_args_list))
+        event.delete.assert_awaited_once()
+
+    async def test_api_id_and_hash_are_deleted_saved_and_not_echoed(self):
+        for lang in ("vi", "en"):
+            self.state.config["LANGUAGE"] = lang
+            prompt = self.event("setup_api_creds")
+            await self.client.handlers["callback_handler"](prompt)
+            api_id = self.event(text="987654321")
+            await self.client.handlers["user_input_handler"](api_id)
+            api_id.delete.assert_awaited_once()
+            self.assertEqual(self.helper.user_sessions[42]["action"], "input_api_hash")
+            api_hash = self.event(text="a" * 32)
+            await self.client.handlers["user_input_handler"](api_hash)
+            api_hash.delete.assert_awaited_once()
+            self.assertEqual(self.state.config["API_ID"], "987654321")
+            self.assertEqual(self.state.config["API_HASH"], "a" * 32)
+            text = str(prompt.edit.call_args_list) + str(api_hash.reply.call_args_list) + self.helper.format_settings_text(lang)
+            self.assertNotIn("987654321", text)
+            self.assertNotIn("a" * 32, text)
+
+    async def test_invalid_api_ids_are_deleted_and_can_be_retried(self):
+        self.helper.user_sessions[42] = {"action": "input_api_id"}
+        for value in ("invalid", "0", "-1", "2147483648", "9" * 5000):
+            event = self.event(text=value)
+            await self.client.handlers["user_input_handler"](event)
+            event.delete.assert_awaited_once()
+            self.assertEqual(self.helper.user_sessions[42]["action"], "input_api_id")
+        self.assertEqual(self.state.config["API_ID"], "123")
+
+    async def test_sensitive_navigation_is_not_deleted_or_treated_as_api_input(self):
+        for action in ("input_api_id", "input_api_hash", "login_wait_code"):
+            session = {"action": action}
+            self.helper.user_sessions[42] = session
+            for text in ("/home", "/start", "/cancel", "/shell pwd", "/ping", "/lang en"):
+                event = self.event(text=text)
+                await self.client.handlers["user_input_handler"](event)
+                event.delete.assert_not_awaited()
+                self.assertEqual(session["action"], action)
+
+    async def test_api_input_cleanup_survives_processing_or_deletion_failures(self):
+        self.helper.user_sessions[42] = {"action": "input_api_id"}
+        event = self.event(text="456")
+        event.delete.side_effect = RuntimeError("no delete permission")
+        await self.client.handlers["user_input_handler"](event)
+        self.assertEqual(self.helper.user_sessions[42]["api_id"], "456")
+        event = self.event(text="a" * 32)
+        with patch.object(self.state, "update_config", side_effect=PermissionError("write failed")):
+            with self.assertRaises(PermissionError):
+                await self.client.handlers["user_input_handler"](event)
         event.delete.assert_awaited_once()
 
     async def test_bootstrap_reset_uses_same_identity_and_confirmation(self):

@@ -97,6 +97,54 @@ class BotUpdaterTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(metadata["from_commit"], self.initial)
         self.assertEqual(metadata["to_commit"], approved)
 
+    async def test_successful_merge_records_completion_but_does_not_send_yet(self):
+        (self.remote / "name.py").write_text("VERSION = 2\n")
+        latest = self.commit("Update with notification")
+        plan = await self.updater.check()
+        record = self.updater.completion.record
+        def after_merge(result, destination):
+            self.assertEqual(self.git(self.local, "rev-parse", "HEAD"), latest)
+            return record(result, destination)
+        with patch.dict(os.environ):
+            with patch.object(self.updater.completion, "record", side_effect=after_merge) as recorded:
+                result = await self.updater.update(self.progress, plan=plan, notify={"owner_id": 42, "lang": "vi", "userbot": False})
+            recorded.assert_called_once()
+        pending = json.loads((self.local / ".update-status/pending.json").read_text())
+        self.assertEqual(pending["latest"], latest)
+        self.assertEqual(pending["snapshot"], result.snapshot)
+        self.assertEqual(pending["owner_id"], 42)
+        self.assertFalse(self.updater.restart_event.is_set())
+
+    async def test_no_change_or_failed_update_never_records_completion(self):
+        with patch.object(self.updater.completion, "record") as record:
+            plan = await self.updater.check()
+            await self.updater.update(self.progress, plan=plan, notify={"owner_id": 42, "lang": "vi", "userbot": False})
+            (self.remote / "name.py").write_text("def broken(:\n")
+            self.commit("Invalid update")
+            plan = await self.updater.check()
+            with self.assertRaises(UpdateError):
+                await self.updater.update(self.progress, plan=plan, notify={"owner_id": 42, "lang": "vi", "userbot": False})
+        record.assert_not_called()
+
+    async def test_record_write_failure_does_not_cancel_successful_update(self):
+        (self.remote / "name.py").write_text("VERSION = 2\n")
+        latest = self.commit("Update")
+        with patch.object(self.updater.completion, "record", side_effect=PermissionError("denied")):
+            result = await self.updater.update(self.progress, plan=await self.updater.check(), notify={"owner_id": 42, "lang": "vi", "userbot": False})
+        self.assertTrue(result.updated)
+        self.assertTrue(self.updater._restart_pending)
+        self.assertEqual(self.git(self.local, "rev-parse", "HEAD"), latest)
+
+    async def test_upstream_cannot_overwrite_completion_receipts(self):
+        status = self.remote / ".update-status"
+        status.mkdir()
+        (status / "delivered.json").write_text('{"id":"fake"}')
+        self.commit("Unsafe completion state")
+        with self.assertRaises(UpdateError) as error:
+            await self.apply_update()
+        self.assertEqual(error.exception.key, "self_update_unsafe_file")
+        self.assertFalse((self.local / ".update-status").exists())
+
     async def test_untracked_source_is_snapshotted_but_secrets_and_runtime_are_not(self):
         (self.local / "local_test.py").write_text('VALUE = "known-private-value"\n')
         (self.local / ".env").write_text("BOT_TOKEN=real-private-bot-token\n")

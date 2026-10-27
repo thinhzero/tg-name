@@ -4,7 +4,7 @@ import unittest
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, Mock, patch
 
-from presence import Presence, elapsed, ping_message
+from presence import Presence, elapsed, ping_message, parse_afk_args
 
 
 class HandlerClient:
@@ -103,6 +103,35 @@ class PresenceTests(unittest.IsolatedAsyncioTestCase):
         await asyncio.gather(*self.presence.tasks)
         event.reply.return_value.delete.assert_awaited_once()
 
+    async def test_default_and_custom_deletion_times_are_used(self):
+        self.assertEqual(Presence().delete_after, 10)
+        for argument, seconds in (("ngủ", 10), ("30s ngủ", 30), ("30 ngủ", 30)):
+            delay, reason = parse_afk_args(argument)
+            self.presence.enable(reason, delete_after=delay)
+            event = self.event()
+            with patch("presence.asyncio.sleep", new=AsyncMock()) as sleep:
+                await self.presence.incoming(event, 42, "Owner")
+                await asyncio.gather(*self.presence.tasks)
+            sleep.assert_awaited_once_with(seconds)
+            event.reply.return_value.delete.assert_awaited_once()
+
+    async def test_changing_afk_does_not_change_an_existing_reply_lifetime(self):
+        self.presence.enable("first", delete_after=30)
+        event = self.event()
+        with patch("presence.asyncio.sleep", new=AsyncMock()) as sleep:
+            await self.presence.incoming(event, 42, "Owner")
+            self.presence.enable("second", delete_after=10)
+            await asyncio.gather(*self.presence.tasks)
+        sleep.assert_awaited_once_with(30)
+
+    async def test_deletion_errors_are_nonfatal(self):
+        event = self.event()
+        event.reply.return_value.delete.side_effect = RuntimeError("no permission")
+        with patch("presence.asyncio.sleep", new=AsyncMock()):
+            await self.presence.incoming(event, 42, "Owner")
+            await asyncio.gather(*self.presence.tasks)
+        event.reply.return_value.delete.assert_awaited_once()
+
     async def test_on_during_send_removes_the_late_auto_reply(self):
         event = self.event()
         message = SimpleNamespace(delete=AsyncMock())
@@ -192,6 +221,24 @@ class PingTests(unittest.IsolatedAsyncioTestCase):
         process.kill.assert_called_once()
 
 
+class AfkArgumentTests(unittest.TestCase):
+    def test_optional_seconds_and_reason(self):
+        for argument, result in (
+            ("", (10, "")), ("đi ngủ", (10, "đi ngủ")),
+            ("30s đi ngủ", (30, "đi ngủ")), ("30 đi ngủ", (30, "đi ngủ")),
+            ("30", (30, "")), ("  2m  ăn cơm  ", (120, "ăn cơm")),
+            ("1H ngủ", (3600, "ngủ")), ("24h", (86400, "")),
+            ("hẹn 30s nữa", (10, "hẹn 30s nữa")), ("<tag> & lý do", (10, "<tag> & lý do")),
+        ):
+            with self.subTest(argument=argument):
+                self.assertEqual(parse_afk_args(argument), result)
+
+    def test_invalid_numeric_durations(self):
+        for argument in ("0", "0s ngủ", "-1 đi ngủ", "+30 ngủ", "1.5s ngủ", "86401", "25h", "9" * 5000):
+            with self.subTest(argument=argument[:30]), self.assertRaises(ValueError):
+                parse_afk_args(argument)
+
+
 HAS_DEPENDENCIES = all(importlib.util.find_spec(name) for name in ("telethon", "dotenv", "aiohttp", "pytz"))
 
 
@@ -255,6 +302,27 @@ class PresenceHandlerTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(self.presence.reason, "ngủ")
         await self.helper_command("/on")
         self.assertFalse(self.presence.active)
+
+    async def test_both_transports_accept_duration_and_reset_to_default(self):
+        for command in (self.command, self.helper_command):
+            prefix = "." if command == self.command else "/"
+            await command(prefix + "afk 30s đi ngủ")
+            self.assertEqual(self.presence.reason, "đi ngủ")
+            self.assertEqual(self.presence.delete_after, 30)
+            await command(prefix + "afk 45 đi ngủ")
+            self.assertEqual(self.presence.delete_after, 45)
+            await command(prefix + "afk đi ngủ")
+            self.assertEqual(self.presence.delete_after, 10)
+
+    async def test_invalid_duration_does_not_change_current_afk(self):
+        self.presence.enable("keep", delete_after=30)
+        since = self.presence.since
+        event = await self.command(".afk 0s invalid")
+        self.assertIn("24h", event.edit.call_args.args[0])
+        await self.helper_command("/afk -10 invalid")
+        self.assertEqual(self.presence.since, since)
+        self.assertEqual(self.presence.reason, "keep")
+        self.assertEqual(self.presence.delete_after, 30)
 
     async def test_helper_afk_requires_running_userbot(self):
         event = await self.helper_command("/afk ngủ", running=False)

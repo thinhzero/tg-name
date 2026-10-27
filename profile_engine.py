@@ -15,6 +15,7 @@ from telethon.errors import FloodWaitError, AboutTooLongError
 
 from updater_state import state, DEFAULT_NAME_FORMAT
 from random_names import random_names
+from bot_updater import notify_update_completed
 
 def get_weather_icon(desc: str) -> str:
     d = (desc or "").lower()
@@ -515,6 +516,13 @@ class ProfileEngine:
             state._force_update_event = asyncio.Event()
             self.updater_task = asyncio.create_task(self._loop())
             print(f"[🚀] Profile Updater đã khởi động thành công cho tài khoản: {state.account_name} ({state.account_id})")
+
+            async def send_completed(text, parse_mode="html"):
+                await self.user_client.send_message("me", text, parse_mode=parse_mode)
+            await notify_update_completed(
+                send_completed, me.id, state.config.get("LANGUAGE", "vi"),
+                userbot=True, legacy=not bool(state.config.get("BOT_TOKEN")),
+            )
             return True, f"Khởi động thành công tài khoản: {state.account_name} (ID: {state.account_id})"
         except Exception as e:
             self.is_running = False

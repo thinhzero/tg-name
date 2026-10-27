@@ -26,6 +26,7 @@ env/
 .coverage
 htmlcov/
 snapshots/
+.update-status/
 
 # Logs
 *.log

@@ -49,6 +49,14 @@ class CommandMenuTests(unittest.TestCase):
 
 @unittest.skipUnless(HAS_DEPENDENCIES, "Cài requirements.txt để kiểm thử đăng ký menu")
 class CommandRegistrationTests(unittest.IsolatedAsyncioTestCase):
+    async def asyncSetUp(self):
+        import bot_setup
+        import helper_bot
+        for module in (bot_setup, helper_bot):
+            patcher = patch.object(module, "notify_update_completed", new=AsyncMock(return_value=False))
+            patcher.start()
+            self.addCleanup(patcher.stop)
+
     async def test_telethon_registers_commands_for_admin_peer_only(self):
         from telethon.tl import functions, types
         client = AsyncMock(return_value=True)

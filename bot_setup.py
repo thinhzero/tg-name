@@ -9,7 +9,7 @@ from telethon import TelegramClient
 from telethon.sessions import StringSession
 
 from updater_state import state
-from bot_updater import bot_updater, run_update_check, run_update_action, update_requests
+from bot_updater import bot_updater, run_update_check, run_update_action, update_requests, notify_update_completed
 from reset_control import reset_requests, reset_notice, reset_buttons, apply_config_reset, cleanup_reset_sessions
 from i18n import get_text
 from shell_commands import shell_runner, run_shell_message, config_secrets
@@ -81,6 +81,11 @@ class BotAPISetup:
         except Exception as exc:
             print(f"[ℹ️] Chưa đồng bộ gợi ý lệnh ({type(exc).__name__}); gửi /start để thử lại.")
             return False
+
+    async def notify_completed(self):
+        async def send_completed(text, parse_mode="html"):
+            await self.call("sendMessage", chat_id=self.admin_id, text=text, parse_mode="HTML")
+        return await notify_update_completed(send_completed, self.admin_id, state.config.get("LANGUAGE", "vi"))
 
     async def call(self, method, **payload):
         url = f"https://api.telegram.org/bot{self.token}/{method}"
@@ -256,10 +261,17 @@ class BotAPISetup:
             self.action = None
             self.api_id = ""
             await self.show_menu()
+            if command == "/start":
+                await self.notify_completed()
             return False
         if text.startswith("/") or self.action is None:
             await self.show_menu()
             return False
+
+        try:
+            await self.call("deleteMessage", chat_id=self.admin_id, message_id=message["message_id"])
+        except (BotSetupError, aiohttp.ClientError, asyncio.TimeoutError):
+            pass
 
         if self.action == "api_id":
             if not re.fullmatch(r"[1-9][0-9]{0,9}", text) or int(text) > 2147483647:
@@ -270,10 +282,6 @@ class BotAPISetup:
             await self.send(self.text("🔑 Gửi <b>API_HASH</b> riêng (32 ký tự hex). Bot sẽ cố xóa tin nhắn chứa hash sau khi nhận.", "🔑 Send your own <b>API_HASH</b> (32 hexadecimal characters). The bot will try to delete the message after receiving it."), self.cancel_keyboard())
             return False
 
-        try:
-            await self.call("deleteMessage", chat_id=self.admin_id, message_id=message["message_id"])
-        except (BotSetupError, aiohttp.ClientError, asyncio.TimeoutError):
-            pass
         if not re.fullmatch(r"[0-9a-fA-F]{32}", text):
             await self.send(self.text("⚠️ API_HASH cần đúng 32 ký tự hex. Nhập lại hoặc bấm Hủy.", "⚠️ API_HASH must contain exactly 32 hexadecimal characters. Retry or cancel."), self.cancel_keyboard())
             return False
@@ -329,6 +337,7 @@ async def run_api_setup(token, admin_id):
                 print("[❌] Bot đang có webhook. Tắt webhook ở dịch vụ cũ trước khi chạy chế độ cài đặt này.")
                 return False
             await setup.register_commands()
+            await setup.notify_completed()
             print(f"[🛠] Mở https://t.me/{me['username']} và /start bằng tài khoản ADMIN_ID={admin_id}.")
             try:
                 await setup.show_menu()

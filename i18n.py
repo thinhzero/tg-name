@@ -27,8 +27,12 @@ MONTHS = {
 TEXTS: Dict[str, Dict[str, str]] = {
     "afk_no_reason": {"vi": "Không có", "en": "Not specified"},
     "afk_enabled": {
-        "vi": "😴 <b>AFK</b>\nLý do: {reason}\nDùng <code>.on</code> hoặc <code>/on</code> để tắt.",
-        "en": "😴 <b>AFK</b>\nReason: {reason}\nUse <code>.on</code> or <code>/on</code> to return."
+        "vi": "😴 <b>AFK</b>\nLý do: {reason}\nTin tự trả lời xóa sau {delete_after}s.\nDùng <code>.on</code> hoặc <code>/on</code> để tắt.",
+        "en": "😴 <b>AFK</b>\nReason: {reason}\nAutomatic replies delete after {delete_after}s.\nUse <code>.on</code> or <code>/on</code> to return."
+    },
+    "afk_usage": {
+        "vi": "⚠️ Dùng <code>.afk [thời gian] [lý do]</code> hoặc <code>/afk [thời gian] [lý do]</code>. Ví dụ: <code>.afk 30s đi ngủ</code>. Mặc định 10s; nhận số giây hoặc s/m/h, từ 1s đến 24h.",
+        "en": "⚠️ Use <code>.afk [time] [reason]</code> or <code>/afk [time] [reason]</code>. Example: <code>.afk 30s sleeping</code>. Default: 10s; accepts seconds or s/m/h, from 1s to 24h."
     },
     "afk_disabled": {"vi": "🟢 Đã tắt AFK.", "en": "🟢 AFK disabled."},
     "afk_login_required": {"vi": "⚠️ Cần đăng nhập và chạy Userbot trước khi bật AFK.", "en": "⚠️ Log in and start the Userbot before enabling AFK."},
@@ -175,8 +179,12 @@ TEXTS: Dict[str, Dict[str, str]] = {
         "en": "✅ <b>The bot is already up to date.</b> Commit: <code>{commit}</code>"
     },
     "self_update_restarting": {
-        "vi": "✅ <b>Đã cập nhật bot:</b> <code>{old}</code> → <code>{new}</code>\n📸 Snapshot: <code>{snapshot}</code>\n🔄 Đang khởi động lại bot...",
-        "en": "✅ <b>Bot updated:</b> <code>{old}</code> → <code>{new}</code>\n📸 Snapshot: <code>{snapshot}</code>\n🔄 Restarting the bot..."
+        "vi": "✅ <b>Đã áp dụng mã nguồn:</b> <code>{old}</code> → <code>{new}</code>\n📸 Snapshot: <code>{snapshot}</code>\n🔄 Đang khởi động lại; bot sẽ báo hoàn tất sau khi kết nối Telegram...",
+        "en": "✅ <b>Source applied:</b> <code>{old}</code> → <code>{new}</code>\n📸 Snapshot: <code>{snapshot}</code>\n🔄 Restarting; completion will be reported after reconnecting to Telegram..."
+    },
+    "self_update_completed": {
+        "vi": "✅ <b>Đã cập nhật xong!</b> Bot đã khởi động lại và kết nối Telegram thành công.\n<code>{old}</code> → <code>{new}</code>\n📸 Snapshot: <code>{snapshot}</code>",
+        "en": "✅ <b>Update completed!</b> The bot restarted and reconnected to Telegram successfully.\n<code>{old}</code> → <code>{new}</code>\n📸 Snapshot: <code>{snapshot}</code>"
     },
     "self_update_busy": {
         "vi": "⏳ Bot đang cập nhật hoặc chuẩn bị khởi động lại. Vui lòng chờ.",

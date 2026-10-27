@@ -149,6 +149,7 @@ class HelperPanelHandlerTests(unittest.IsolatedAsyncioTestCase):
             patch.object(helper_bot.state, "update_config"),
             patch.dict(helper_bot.user_sessions, {}, clear=True),
             patch.object(helper_bot, "generate_preview", return_value=("Preview", "Bio")),
+            patch.object(helper_bot, "notify_update_completed", new=AsyncMock(return_value=False)),
         ):
             patcher.start()
             self.addCleanup(patcher.stop)
