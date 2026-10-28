@@ -25,9 +25,39 @@ MONTHS = {
 }
 
 TEXTS: Dict[str, Dict[str, str]] = {
-    "lookup_ip_usage": {
-        "vi": "🌐 Dùng <code>.ip 1.1.1.1</code> hoặc <code>/ip 1.1.1.1</code>. Nhận IPv4/IPv6 công khai; không tự tra IP máy chạy bot.",
-        "en": "🌐 Use <code>.ip 1.1.1.1</code> or <code>/ip 1.1.1.1</code>. Accepts public IPv4/IPv6; never looks up the bot host's IP implicitly."
+    "log_event_afk": {"vi": "😴 <b>AFK · Tin nhắn khi vắng mặt</b>", "en": "😴 <b>AFK · Message while away</b>"},
+    "log_event_error": {"vi": "❌ <b>Lỗi</b>", "en": "❌ <b>Error</b>"},
+    "log_event_update": {"vi": "🔄 <b>Cập nhật code</b>", "en": "🔄 <b>Code update</b>"},
+    "log_event_profile": {"vi": "👤 <b>Đã cập nhật tên/bio</b>", "en": "👤 <b>Profile updated</b>"},
+    "log_event_command": {"vi": "💻 <b>Lệnh đã dùng</b>", "en": "💻 <b>Command used</b>"},
+    "log_original": {"vi": "Mở tin nhắn gốc", "en": "Open original message"},
+    "log_private_note": {"vi": "Link chat 1–1 chỉ dành cho tài khoản có tin này; tg://openmessage tùy ứng dụng hỗ trợ, không phải link công khai.", "en": "One-to-one links require the account holding this message; tg://openmessage support depends on the client, not a public link."},
+    "log_panel": {
+        "vi": "🧾 <b>CẤU HÌNH LOG</b>\nĐích: <code>{target}</code> · {status}\n\nBấm ✅/❌ để bật/tắt từng loại log và chi tiết AFK.\n🔒 AFK + link tin gốc không thể tắt riêng. Không sao chép nội dung tin nhắn.\n\nLỗi gửi gần nhất: {error}\nSố log bỏ qua do hàng đợi đầy: {dropped}",
+        "en": "🧾 <b>LOG SETTINGS</b>\nDestination: <code>{target}</code> · {status}\n\nTap ✅/❌ to toggle log types and AFK details.\n🔒 AFK + original message link cannot be disabled individually. Message bodies are not copied.\n\nLast delivery error: {error}\nLogs dropped due to a full queue: {dropped}"
+    },
+    "log_disable": {"vi": "⏹ Tắt toàn bộ log", "en": "⏹ Disable all logging"},
+    "log_enable": {"vi": "▶️ Bật log tại đích này", "en": "▶️ Enable logging here"},
+    "log_denied": {"vi": "Chỉ chủ Userbot hoặc ADMIN_ID được đổi cấu hình log.", "en": "Only the Userbot owner or ADMIN_ID can change logging."},
+    "log_expired": {"vi": "Bảng cũ/sai chat. Gửi .logconfig để mở bảng mới.", "en": "Stale or mismatched settings. Use .logconfig to open a fresh panel."},
+    "log_afk_required": {"vi": "AFK và link tin nhắn gốc là bắt buộc. Có thể tắt toàn bộ log bằng nút cuối/.unloghere.", "en": "AFK and the original message link are required. Use the last button/.unloghere to disable all logging."},
+    "log_save_failed": {"vi": "❌ Chưa lưu được cấu hình log. Kiểm tra quyền ghi .env hoặc quyền gửi tin rồi thử lại.", "en": "❌ Could not save log settings. Check .env write permissions and message permissions, then retry."},
+    "log_panel_refresh": {"vi": "Đã lưu cấu hình nhưng chưa sửa được bảng. Gửi .logconfig để mở lại đúng trạng thái mới.", "en": "Settings were saved, but the panel could not be edited. Use .logconfig to show the new state."},
+    "log_not_here": {"vi": "ℹ️ Chat này không phải đích log hiện tại; không thay đổi cấu hình.", "en": "ℹ️ This chat is not the current log destination; nothing changed."},
+    "log_usage": {"vi": "Dùng .loghere để chọn đích; .unloghere để tắt tại đó; .logconfig [afk,error,update,profile,command] để mở/chỉnh bảng. AFK luôn được thêm.", "en": "Use .loghere to select a destination, .unloghere to disable it there, or .logconfig [afk,error,update,profile,command] to open/configure settings. AFK is always included."},
+    "log_configured": {"vi": "🧾 Log tại <code>{target}</code>: {status}\nLoại: <code>{kinds}</code>\nChỉnh ✅/❌ trên bảng qua Helper Bot.", "en": "🧾 Logging at <code>{target}</code>: {status}\nTypes: <code>{kinds}</code>\nUse ✅/❌ on the Helper Bot panel."},
+    "log_no_controls": {"vi": "Chưa gửi được bảng: cần Helper Bot (BOT_TOKEN), /setinline trong BotFather; hoặc quyền gửi của bot/admin đã nhấn Start để dùng dự phòng. Vẫn chỉnh được bằng .logconfig và .unloghere.", "en": "Panel unavailable: configure a Helper Bot (BOT_TOKEN) and /setinline in BotFather, or allow the bot to post/the admin to Start it for fallback. .logconfig and .unloghere still work."},
+    "speed_running": {"vi": "📶 Đang đo download/upload/ping (tối đa 120s)... IP sẽ được ẩn; .cancel hoặc /cancel để hủy. Phép đo có dùng băng thông.", "en": "📶 Measuring download/upload/ping (up to 120s)... IP will be hidden; .cancel or /cancel to stop. This test uses bandwidth."},
+    "speed_busy": {"vi": "⏳ Đang có speedtest chạy. Chờ xong hoặc hủy đúng chat đã gọi.", "en": "⏳ A speedtest is running. Wait or cancel it in the chat where it was started."},
+    "speed_missing": {"vi": "⚠️ Chưa có speedtest-cli. Chạy lại python name.py để tự cài, hoặc python -m pip install -r requirements.txt trong venv.", "en": "⚠️ speedtest-cli is missing. Restart python name.py to install it, or run python -m pip install -r requirements.txt inside the venv."},
+    "speed_failed": {"vi": "❌ Chưa đo được tốc độ. Dịch vụ Speedtest/mạng có thể đang lỗi; thử lại sau. Không gửi JSON, ảnh share hoặc IP.", "en": "❌ Speedtest failed. The service or network may be unavailable; try later. No raw JSON, share image or IP was sent."},
+    "speed_timeout": {"vi": "⌛ Speedtest quá 120s, đã dừng tiến trình.", "en": "⌛ Speedtest exceeded 120s; its process was stopped."},
+    "speed_cancelled": {"vi": "❌ Đã hủy speedtest và dừng tiến trình.", "en": "❌ Speedtest cancelled and its process stopped."},
+    "tasks_cancelled": {"vi": "❌ Đã yêu cầu hủy tác vụ tải/gửi file hoặc speedtest trong chat này.", "en": "❌ Requested cancellation of file transfers or speedtest in this chat."},
+    "tasks_not_running": {"vi": "ℹ️ Không có tác vụ tải/gửi file hoặc speedtest của bạn trong chat này.", "en": "ℹ️ You have no file transfer or speedtest running in this chat."},
+    "speed_result": {
+        "vi": "📶 <b>SPEEDTEST</b>\n⬇️ Download: <code>{download} Mbps</code>\n⬆️ Upload: <code>{upload} Mbps</code>\n🏓 Ping: <code>{ping} ms</code>\n🌐 Máy chủ: {server} · {country}\n📡 ISP: {isp}\n🔒 IP: <code>hidden</code>",
+        "en": "📶 <b>SPEEDTEST</b>\n⬇️ Download: <code>{download} Mbps</code>\n⬆️ Upload: <code>{upload} Mbps</code>\n🏓 Ping: <code>{ping} ms</code>\n🌐 Server: {server} · {country}\n📡 ISP: {isp}\n🔒 IP: <code>hidden</code>"
     },
     "lookup_whois_usage": {
         "vi": "🔎 Dùng <code>.whois example.com</code> hoặc <code>/whois example.com</code>. Chỉ nhập tên miền, không nhập URL/đường dẫn/port.",
@@ -37,10 +67,6 @@ TEXTS: Dict[str, Dict[str, str]] = {
     "lookup_failed": {"vi": "❌ Chưa tra được. Dịch vụ có thể đang lỗi, không hỗ trợ tên miền này hoặc mạng bị gián đoạn; thử lại sau.", "en": "❌ Lookup failed. The service may be unavailable, the domain unsupported, or the connection interrupted; try again later."},
     "lookup_missing": {"vi": "⚠️ Không tìm thấy dữ liệu công khai cho địa chỉ/tên miền này.", "en": "⚠️ No public data was found for this address/domain."},
     "lookup_rate_limited": {"vi": "⏳ Dịch vụ đang giới hạn lượt tra cứu. Hãy đợi rồi thử lại.", "en": "⏳ The lookup service is rate-limiting requests. Wait before retrying."},
-    "lookup_ip_result": {
-        "vi": "🌐 <b>IP {ip}</b>\n🏳️ Quốc gia: {country}\n🏙️ Khu vực: {region} · {city}\n📡 ISP: {isp}\n🏢 Tổ chức: {org}\n🔗 ASN: {asn}\n\n<i>Nguồn: ipwho.is · Vị trí chỉ là ước lượng.</i>",
-        "en": "🌐 <b>IP {ip}</b>\n🏳️ Country: {country}\n🏙️ Region: {region} · {city}\n📡 ISP: {isp}\n🏢 Organization: {org}\n🔗 ASN: {asn}\n\n<i>Source: ipwho.is · Location is approximate.</i>"
-    },
     "lookup_whois_result": {
         "vi": "🔎 <b>Tên miền {domain}</b>\n🏢 Nhà đăng ký: {registrar}\n📅 Đăng ký: {registered}\n⌛ Hết hạn: {expires}\n🔄 Thay đổi: {changed}\n📋 Trạng thái: {status}\n🌐 Nameserver: {ns}\n\n<i>Nguồn: RDAP qua rdap.org · Không hiện thông tin liên hệ cá nhân.</i>",
         "en": "🔎 <b>Domain {domain}</b>\n🏢 Registrar: {registrar}\n📅 Registered: {registered}\n⌛ Expires: {expires}\n🔄 Changed: {changed}\n📋 Status: {status}\n🌐 Nameservers: {ns}\n\n<i>Source: RDAP via rdap.org · Personal contact details are omitted.</i>"

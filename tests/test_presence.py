@@ -103,6 +103,33 @@ class PresenceTests(unittest.IsolatedAsyncioTestCase):
         await asyncio.gather(*self.presence.tasks)
         event.reply.return_value.delete.assert_awaited_once()
 
+    async def test_private_messages_trigger_afk_without_mention_and_log_original_event(self):
+        event = self.event(mentioned=False)
+        event.is_private = True
+        event.id = 456
+        with patch("presence.chat_log") as logger:
+            await self.presence.incoming(event, 42, "Owner")
+        event.reply.assert_awaited_once()
+        logger.afk.assert_called_once()
+        self.assertIs(logger.afk.call_args.args[0], event)
+        self.assertEqual(logger.afk.call_args.args[0].id, 456)
+
+    async def test_afk_logging_is_not_suppressed_by_auto_reply_cooldown(self):
+        event = self.event()
+        with patch("presence.chat_log") as logger:
+            await self.presence.incoming(event, 42, "Owner")
+            await self.presence.incoming(event, 42, "Owner")
+        self.assertEqual(logger.afk.call_count, 2)
+        event.reply.assert_awaited_once()
+
+    async def test_telegram_login_service_is_never_replied_to_or_logged(self):
+        event = self.event(sender=777000)
+        event.is_private = True
+        with patch("presence.chat_log") as logger:
+            await self.presence.incoming(event, 42, "Owner")
+        event.reply.assert_not_awaited()
+        logger.afk.assert_not_called()
+
     async def test_default_and_custom_deletion_times_are_used(self):
         self.assertEqual(Presence().delete_after, 10)
         for argument, seconds in (("ngủ", 10), ("30s ngủ", 30), ("30 ngủ", 30)):
@@ -172,12 +199,15 @@ class PresenceTests(unittest.IsolatedAsyncioTestCase):
 class PingTests(unittest.IsolatedAsyncioTestCase):
     async def test_ping_without_host_only_edits_one_message(self):
         edit = AsyncMock()
-        with patch("presence.asyncio.create_subprocess_exec", new=AsyncMock()) as create:
-            await ping_message("", edit)
+        process = SimpleNamespace(returncode=0, communicate=AsyncMock(return_value=(b"google reply", None)))
+        with patch("presence.shutil.which", return_value="/ping"):
+            with patch("presence.asyncio.create_subprocess_exec", new=AsyncMock(return_value=process)) as create:
+                await ping_message("", edit)
         self.assertEqual(edit.await_count, 2)
         self.assertIn("Uptime", edit.call_args.args[0])
         self.assertIn("Telegram", edit.call_args.args[0])
-        create.assert_not_awaited()
+        self.assertEqual(create.call_args.args[-1], "google.com")
+        self.assertIn("google.com", edit.call_args.args[0])
 
     async def test_bad_hosts_urls_and_flags_never_execute(self):
         with patch("presence.asyncio.create_subprocess_exec", new=AsyncMock()) as create:
@@ -201,6 +231,16 @@ class PingTests(unittest.IsolatedAsyncioTestCase):
                 await ping_message("::1", edit)
         self.assertEqual(create.call_args.args, ("/termux/usr/bin/ping", "-c", "1", "-W", "2", "::1"))
         self.assertIn("&lt;reply&gt;&amp;", edit.call_args.args[0])
+
+    async def test_explicit_ping_host_replaces_google_instead_of_adding_a_second_ping(self):
+        process = SimpleNamespace(returncode=0, communicate=AsyncMock(return_value=(b"target reply", None)))
+        edit = AsyncMock()
+        with patch("presence.shutil.which", return_value="/ping"):
+            with patch("presence.asyncio.create_subprocess_exec", new=AsyncMock(return_value=process)) as create:
+                await ping_message("yotube.com", edit)
+        create.assert_awaited_once()
+        self.assertEqual(create.call_args.args[-1], "yotube.com")
+        self.assertNotIn("google.com", edit.call_args.args[0])
 
     async def test_timeout_kills_and_reaps_ping(self):
         edit = AsyncMock()
@@ -251,6 +291,7 @@ class PresenceHandlerTests(unittest.IsolatedAsyncioTestCase):
         for patcher in (
             patch.object(helper_bot, "presence", self.presence),
             patch.dict(helper_bot.state.config, {"ADMIN_ID": "42", "LANGUAGE": "vi"}),
+            patch("presence.shutil.which", return_value=None),
         ):
             patcher.start()
             self.addCleanup(patcher.stop)

@@ -9,6 +9,7 @@ from html import escape
 
 from i18n import get_text
 from shell_commands import clipped_html
+from chat_logging import chat_log
 
 
 STARTED_AT = time.monotonic()
@@ -76,10 +77,10 @@ class Presence:
     async def incoming(self, event, owner_id, name, lang="vi"):
         if not self.active or event.out or not owner_id:
             return
-        if event.sender_id == int(owner_id) or getattr(event.message, "via_bot_id", None):
+        if event.sender_id in (int(owner_id), 777000) or getattr(event.message, "via_bot_id", None):
             return
         since = self.since
-        mentioned = bool(getattr(event.message, "mentioned", False))
+        mentioned = bool(getattr(event, "is_private", False) or getattr(event.message, "mentioned", False))
         if not mentioned and event.is_reply:
             try:
                 reply = await event.get_reply_message()
@@ -94,6 +95,7 @@ class Presence:
             return
         if getattr(sender, "bot", False) or not self.active or self.since != since:
             return
+        chat_log.afk(event, sender, self.reason, elapsed(time.monotonic() - since))
         key = (event.chat_id, event.sender_id)
         now = time.monotonic()
         if key in self.replies and now - self.replies[key] < self.cooldown:
@@ -134,6 +136,7 @@ class Presence:
 
 
 async def ping_message(target, edit, lang="vi"):
+    target = target or "google.com"
     if target and (not re.fullmatch(r"[A-Za-z0-9_.:-]{1,253}", target) or target.startswith("-")):
         await edit(get_text("ping_usage", lang), parse_mode="html")
         return

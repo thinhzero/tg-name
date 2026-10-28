@@ -416,6 +416,9 @@ class BotAPISetupPanelTests(unittest.IsolatedAsyncioTestCase):
         self.module = bot_setup
         self.setup = bot_setup.BotAPISetup(Mock(), "fake-bot-token", "42")
         self.setup.call = AsyncMock(return_value={"message_id": 7})
+        ping_patch = patch("presence.shutil.which", return_value=None)
+        ping_patch.start()
+        self.addCleanup(ping_patch.stop)
 
     async def test_repeated_prompts_edit_one_silent_message(self):
         await self.setup.send("Prompt")

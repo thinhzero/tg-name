@@ -7,7 +7,8 @@ Chỉ tham khảo ý tưởng và giao diện lệnh; triển khai lại trên k
 
 | Source cũ | Bản hiện tại | Thay đổi chính |
 | --- | --- | --- |
-| `.ip` | `.ip`, `/ip` | Async HTTP, HTTPS, IPv4/IPv6 công khai, timeout, escape HTML; không tự lộ IP máy bot. |
+| `.ip` | Đã bỏ | Không đăng ký command/menu hoặc gọi dịch vụ tra IP. |
+| `.speed`, `.speedtest` | `.speedtest`, `.speetest`, `.sp`, `.speed` và alias `/` | Subprocess hủy được, timeout 120s, giữ kiểm tra TLS; chỉ whitelist kết quả, không share và luôn ẩn IP. |
 | `.whois` | `.whois`, `/whois` | RDAP thay cho scrape HTML; IDNA, giới hạn dữ liệu, không hiện contact cá nhân. |
 | `.l`, download/upload | `.l`, `/l` | Streaming có giới hạn; temp riêng cho từng tác vụ, tên file an toàn, dọn cả khi lỗi/hủy. |
 | progress | `TransferProgress` | Trạng thái riêng từng tác vụ, throttle, không dùng đối số mặc định mutable hoặc tạo task cho từng chunk. |
@@ -24,9 +25,10 @@ body lỗi của dịch vụ hoặc exception chứa thông tin bí mật vào c
   `ping3`/raw socket. Không thêm handler trùng hoặc lùi mặc định tự xóa AFK về 5 giây.
 - `.music`: source cũ dùng tìm/tải YouTube và polling API không có giới hạn; tên lệnh hiện
   dành cho Last.fm. Nếu bổ sung sau sẽ dùng tên riêng, timeout và tác vụ hủy thực sự.
-- YouTube/speedtest: chưa thêm phụ thuộc mới hoặc job thread không hủy được. Source cũ còn
-  tắt kiểm tra chứng chỉ cho yt-dlp và tự tạo link chia sẻ speedtest; không giữ hai hành vi đó.
-- Pixeldrain: cần API riêng và luồng cấu hình ẩn; không đem key/cookie/link bypass cũ sang.
+- YouTube: chưa mang job thread không hủy được hoặc tùy chọn tắt kiểm tra chứng chỉ sang.
+- Speedtest: không giữ `results.share()`/ảnh chia sẻ từ source cũ; dùng `speedtest-cli` đã kê
+  trong requirements, subprocess qua runner có giới hạn và kill/reap khi hủy.
+- Pixeldrain: không đem key/cookie/link bypass cũ sang, không đăng ký `.up`/`/up` theo yêu cầu.
 - Quote và plugin ảnh/API ngoài: cần kiểm tra lại dịch vụ, dữ liệu gửi cho bên thứ ba và
   kích thước phản hồi trước khi tích hợp. Quote cũ còn đưa bytes avatar thẳng vào JSON.
 - `drgen.py`: phụ thuộc module `bot.*` của dự án khác, nhiều host/API cũ; không kéo toàn bộ

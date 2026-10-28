@@ -45,6 +45,8 @@ from presence import presence, ping_message, parse_afk_args
 from bot_commands import register_helper_commands
 from network_tools import lookup_message
 from file_transfer import file_transfers, link_argument
+from chat_logging import chat_log
+from speed_test import speed_tests
 
 # Lưu trạng thái đàm thoại của user: user_id -> {"action": ..., "data": ...}
 user_sessions = {}
@@ -627,6 +629,12 @@ def format_help(lang="vi", helper=False):
             "• <code>/settings</code>: cài bằng nút bấm; <code>/reset</code>: chỉ giữ token bot/admin (cần xác nhận).\n"
             "• <code>/shell &lt;lệnh&gt;</code>: chạy lệnh Linux/Termux bất kỳ, VD <code>/shell ls -la</code>, <code>/shell fastfetch</code> (chỉ admin, 30 giây).\n"
         )
+    else:
+        settings_help = (
+            "• <code>.loghere</code> / <code>.unloghere</code>, <code>.logconfig</code>: inline ✅/❌ log settings; AFK + links required.\n"
+            if lang == "en" else
+            "• <code>.loghere</code> / <code>.unloghere</code>, <code>.logconfig</code>: bảng log ✅/❌; bắt buộc AFK + link.\n"
+        )
     example = (
         f"<code>{p}{name_cmd} HzzMonet</code>\n"
         f"<code>{p}nameformat {DEFAULT_NAME_FORMAT}</code>\n"
@@ -648,8 +656,9 @@ def format_help(lang="vi", helper=False):
             f"• <code>{p}updatecheck</code>: compare GitHub commits; asks before updating CODE.\n"
             f"• <code>{p}status</code>, <code>{p}pause</code>, <code>{p}resume</code>\n"
             f"• <code>{p}afk [10s] [reason]</code>, <code>{p}on</code>: away / back; replies auto-delete (default 10s).\n"
-            f"• <code>{p}ping [host]</code>: Telegram latency + uptime; optional system ping.\n"
-            f"• <code>{p}ip 1.1.1.1</code>, <code>{p}whois example.com</code>: public IP / domain lookup.\n"
+            f"• <code>{p}ping [host]</code>: Telegram + uptime; default host google.com.\n"
+            f"• <code>{p}sp</code> / <code>{p}speedtest</code>: speed test, IP hidden.\n"
+            f"• <code>{p}whois example.com</code>: domain lookup.\n"
             f"• <code>{p}l URL</code>: direct link → Telegram (max 100 MiB); <code>{p}cancel</code> stops it.\n"
             f"{settings_help}"
             f"• <code>{p}bioformat {{weather_short}} ⏰ HH:mm</code>: change bio.\n"
@@ -674,8 +683,9 @@ def format_help(lang="vi", helper=False):
         f"• <code>{p}updatecheck</code>: đếm commit GitHub; hỏi trước khi cập nhật CODE.\n"
         f"• <code>{p}status</code>, <code>{p}pause</code>, <code>{p}resume</code>\n"
         f"• <code>{p}afk [10s] [lý do]</code>, <code>{p}on</code>: bật / tắt vắng mặt; tự xóa trả lời (mặc định 10s).\n"
-        f"• <code>{p}ping [host]</code>: độ trễ Telegram + uptime; có host thì ping hệ thống.\n"
-        f"• <code>{p}ip 1.1.1.1</code>, <code>{p}whois example.com</code>: tra IP / tên miền.\n"
+        f"• <code>{p}ping [host]</code>: Telegram + uptime; mặc định ping google.com.\n"
+        f"• <code>{p}sp</code> / <code>{p}speedtest</code>: đo mạng, ẩn IP.\n"
+        f"• <code>{p}whois example.com</code>: tra tên miền.\n"
         f"• <code>{p}l URL</code>: link trực tiếp → Telegram (tối đa 100 MiB); <code>{p}cancel</code> để hủy.\n"
         f"{settings_help}"
         f"• <code>{p}bioformat {{weather_short}} ⏰ HH:mm</code>: đổi mẫu bio.\n"
@@ -690,13 +700,22 @@ def format_help(lang="vi", helper=False):
 
 def register_userbot_handlers(client: TelegramClient):
     """Đăng ký các lệnh tự điều khiển trên Userbot (.status, .name, .update, ...)"""
-    @client.on(events.NewMessage(outgoing=True, pattern=r"^\.(help|status|update|updatecheck|updateconfirm|updatecancel|updaterandom|lsrandom|rmrandom|afk|on|ping|ip|whois|l|cancel|name|setname|basename|city|pause|resume|nameformat|setnameformat|bioformat|setbio|lastfm|music|bio|previewbio|preview|weather|lang)(?:\s+([\s\S]+))?$"))
+    @client.on(events.NewMessage(outgoing=True, pattern=r"^\.(help|status|update|updatecheck|updateconfirm|updatecancel|updaterandom|lsrandom|rmrandom|afk|on|ping|whois|l|cancel|loghere|unloghere|logconfig|logtypes|speedtest|speetest|speed|sp|name|setname|basename|city|pause|resume|nameformat|setnameformat|bioformat|setbio|lastfm|music|bio|previewbio|preview|weather|lang)(?:\s+([\s\S]+))?$"))
     async def userbot_command_handler(event):
         cmd = event.pattern_match.group(1).lower()
         arg = (event.pattern_match.group(2) or "").strip()
         cur_lang = state.config.get("LANGUAGE", "vi")
+        chat_log.emit("command", {"command": f".{cmd}"})
 
-        if cmd in ("ip", "whois"):
+        if cmd in ("loghere", "unloghere", "logconfig", "logtypes"):
+            if not state.is_resetting:
+                await chat_log.command(event, cmd, arg, client, state)
+
+        elif cmd in ("speedtest", "speetest", "speed", "sp"):
+            if not state.is_resetting:
+                await speed_tests.run(event.edit, owner_id=event.sender_id, chat_id=event.chat_id, userbot=True, lang=cur_lang, secret_values=config_secrets(state.config))
+
+        elif cmd == "whois":
             if not state.is_resetting:
                 await lookup_message(cmd, arg, event.edit, cur_lang)
 
@@ -706,7 +725,8 @@ def register_userbot_handlers(client: TelegramClient):
         elif cmd == "cancel":
             if not state.is_resetting:
                 cancelled = file_transfers.cancel(int(event.sender_id), event.chat_id, userbot=True)
-                await event.edit(get_text("transfer_cancelled" if cancelled else "transfer_not_running", cur_lang), parse_mode="html")
+                cancelled = speed_tests.cancel(int(event.sender_id), event.chat_id, userbot=True) or cancelled
+                await event.edit(get_text("tasks_cancelled" if cancelled else "tasks_not_running", cur_lang), parse_mode="html")
 
         elif cmd == "afk":
             try:
@@ -868,22 +888,41 @@ def register_bot_handlers(bot_client: TelegramClient):
             async def dispatch(event):
                 session = user_sessions.get(event.sender_id)
                 if is_admin(event.sender_id) and getattr(event, "is_private", True):
+                    if getattr(builder, "pattern", None) and getattr(event, "data", None) is None:
+                        command = re.match(r"^/(\w+)", getattr(event, "raw_text", ""))
+                        if command:
+                            chat_log.emit("command", {"command": "/" + command[1]})
                     input_panel = session.get("_panel") if session else None
                     event = panels.wrap(event, panel=input_panel if getattr(event, "data", None) is None else None)
-                return await handler(event)
+                try:
+                    return await handler(event)
+                except Exception as exc:
+                    chat_log.emit("error", {"action": handler.__name__, "error": type(exc).__name__})
+                    raise
             return bot_client.on(builder)(dispatch)
         return register
 
     @bot_client.on(events.NewMessage)
     @bot_client.on(events.CallbackQuery)
     async def private_chat_only(event):
-        if not event.is_private or state.is_resetting:
+        log_button = (getattr(event, "data", None) or b"").startswith(b"logcfg:")
+        if (not event.is_private and not log_button) or state.is_resetting:
             raise events.StopPropagation
+
+    @bot_client.on(events.CallbackQuery(pattern=rb"^logcfg:"))
+    async def log_settings_callback(event):
+        await chat_log.button(event, state)
+        raise events.StopPropagation
+
+    @bot_client.on(events.InlineQuery(pattern=r"^tgname_log "))
+    async def log_settings_inline(event):
+        await chat_log.inline(event, state)
 
     @on(events.NewMessage(pattern=r"^/cancel(?:@\w+)?\s*$"))
     async def cancel_cmd(event):
         if not is_admin(event.sender_id) or not getattr(event, "is_private", True) or state.is_resetting: return
         file_transfers.cancel(event.sender_id, getattr(event, "chat_id", event.sender_id))
+        speed_tests.cancel(event.sender_id, getattr(event, "chat_id", event.sender_id))
         await cancel_user_dialog(event.sender_id)
         await event.reply("❌ <b>Đã hủy thao tác hiện tại!</b>", parse_mode="html", buttons=get_main_keyboard())
 
@@ -984,6 +1023,7 @@ def register_bot_handlers(bot_client: TelegramClient):
         if not is_admin(event.sender_id) or not event.is_private or state.is_resetting: return
         lang = state.config.get("LANGUAGE", "vi")
         command = (event.pattern_match.group(1) or "").strip()
+        chat_log.emit("command", {"command": "/shell"})
         async def reply_result(text, parse_mode="html"):
             await event.reply(text, parse_mode=parse_mode, silent=True)
         await run_shell_message(command, reply_result, lang, runner=shell_runner, secret_values=config_secrets(state.config))
@@ -1010,13 +1050,18 @@ def register_bot_handlers(bot_client: TelegramClient):
             presence.enable(reason, delete_after=delete_after)
             await event.reply(presence.notice(lang), parse_mode="html")
 
-    @on(events.NewMessage(pattern=r"^/(ip|whois)(?:@\w+)?(?:\s+([\s\S]+))?\s*$"))
+    @on(events.NewMessage(pattern=r"^/(whois)(?:@\w+)?(?:\s+([\s\S]+))?\s*$"))
     async def lookup_cmd(event):
         if not is_admin(event.sender_id) or not event.is_private or state.is_resetting: return
         await lookup_message(
             event.pattern_match.group(1), (event.pattern_match.group(2) or "").strip(),
             event.edit, state.config.get("LANGUAGE", "vi"),
         )
+
+    @on(events.NewMessage(pattern=r"^/(?:speedtest|speetest|speed|sp)(?:@\w+)?\s*$"))
+    async def speedtest_cmd(event):
+        if not is_admin(event.sender_id) or not event.is_private or state.is_resetting: return
+        await speed_tests.run(event.edit, owner_id=event.sender_id, chat_id=event.chat_id, lang=state.config.get("LANGUAGE", "vi"), secret_values=config_secrets(state.config))
 
     @on(events.NewMessage(pattern=r"^/l(?:@\w+)?(?:\s+([\s\S]+))?\s*$"))
     async def link_transfer_cmd(event):
@@ -1293,7 +1338,8 @@ def register_bot_handlers(bot_client: TelegramClient):
     async def _user_input_handler_impl(event):
         if not is_admin(event.sender_id): return
         if event.raw_text.strip() == "/cancel": return
-        if re.match(r"^/(?:updaterandom|lsrandom|rmrandom|help|updatecheck|start|home|setup|login|reset|settings|shell|afk|on|ping|ip|whois|l|cancel|status|update|pause|resume|lang|language|preview|previewbio|weather|music|nowplaying)(?:@\w+)?(?:\s|$)", event.raw_text.strip()): return
+        if re.match(r"^/(?:ip|up)(?:@\w+)?(?:\s|$)", event.raw_text.strip()): return
+        if re.match(r"^/(?:updaterandom|lsrandom|rmrandom|help|updatecheck|start|home|setup|login|reset|settings|shell|afk|on|ping|whois|l|cancel|speedtest|speetest|speed|sp|status|update|pause|resume|lang|language|preview|previewbio|weather|music|nowplaying)(?:@\w+)?(?:\s|$)", event.raw_text.strip()): return
 
         sess = user_sessions.get(event.sender_id)
         if not sess: return
@@ -2113,6 +2159,7 @@ async def run_standalone_bot():
     try:
         await bot_client.start(bot_token=bot_token)
         me = await bot_client.get_me()
+        chat_log.bind_controls(bot_client, lambda: state.config, me.username)
         await register_helper_commands(bot_client, int(admin_id), state.config.get("LANGUAGE", "vi"))
         print(f"[✅] Helper Bot đang hoạt động: @{me.username} (ID: {me.id})")
         print(f"[ℹ️] ADMIN_ID được cấp phép: {admin_id}")
@@ -2141,11 +2188,14 @@ async def run_standalone_bot():
         await bot_client.run_until_disconnected()
     finally:
         try:
+            await speed_tests.close(userbot=False)
             await file_transfers.close(userbot=False)
             for user_id in list(user_sessions):
                 await cancel_user_dialog(user_id)
             await engine.stop()
         finally:
+            if chat_log.controls is bot_client:
+                chat_log.controls = None
             await bot_client.disconnect()
             if state.is_resetting:
                 cleanup_reset_sessions()

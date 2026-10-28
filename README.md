@@ -205,7 +205,8 @@ Nếu xóa hết mục, `{random}` trở thành chuỗi rỗng, không tự khô
 
 ## 3. Các lệnh thường dùng
 
-Helper Bot chỉ nhận lệnh trong **chat riêng**, từ `ADMIN_ID` đã cấu hình.
+Helper Bot chỉ nhận lệnh trong **chat riêng**, từ `ADMIN_ID` đã cấu hình. Riêng nút cấu hình
+log có thể ở chat/kênh đã chọn; chỉ chủ Userbot hoặc `ADMIN_ID` được bấm để thay đổi.
 
 | Mục đích | Userbot | Helper Bot |
 | --- | --- | --- |
@@ -219,10 +220,12 @@ Helper Bot chỉ nhận lệnh trong **chat riêng**, từ `ADMIN_ID` đã cấu
 | Tạm dừng / tiếp tục | `.pause` / `.resume` | `/pause` / `/resume` |
 | Vắng mặt / trở lại | `.afk [thời gian] [lý do]` / `.on` | `/afk [thời gian] [lý do]` / `/on` |
 | Ping và uptime | `.ping [host]` | `/ping [host]` |
-| Tra IP công khai | `.ip 1.1.1.1` | `/ip 1.1.1.1` |
+| Speedtest, ẩn IP | `.speedtest` / `.speetest` / `.sp` | `/speedtest` / `/sp` |
+| Chọn / bỏ đích log | `.loghere` / `.unloghere` tại chat/kênh đó | Bảng inline qua Helper Bot |
+| Chỉnh loại log, chi tiết AFK | `.logconfig` (alias `.logtypes`) | Nút ✅/❌ trên bảng log |
 | Tra đăng ký tên miền | `.whois example.com` | `/whois example.com` |
 | Tải link file → Telegram | `.l URL` | `/l URL` |
-| Hủy tác vụ tải/gửi file | `.cancel` | `/cancel` (đồng thời hủy bước nhập) |
+| Hủy tải/gửi file hoặc speedtest | `.cancel` | `/cancel` (đồng thời hủy bước nhập) |
 | Về Home nhanh | — | `/home` hoặc nút **🏠 Home** |
 | Đổi tên cố định | `.name tên mới` | `/setname tên mới` |
 | Đổi mẫu tên | `.nameformat mẫu` | `/nameformat mẫu` |
@@ -254,36 +257,81 @@ nhạy cảm sau khi hoàn tất. Không gửi token/API key trong nhóm hoặc 
 .ping example.com
 ```
 
-`.afk` bật vắng mặt: khi có người mention hoặc reply tin của bạn, Userbot trả lý do và thời
+`.afk` bật vắng mặt: khi có người nhắn riêng, mention hoặc reply tin của bạn, Userbot trả lý do và thời
 gian AFK. Mỗi người trong mỗi chat được trả lời tối đa một lần mỗi 60 giây; tin trả lời
 gửi im lặng và cố tự xóa sau **10 giây mặc định**. Có thể đặt thời gian đứng trước lý do:
 `.afk 30s đi ngủ` hoặc `.afk 30 đi ngủ` xóa tin tự trả lời sau 30 giây; `/afk` dùng cùng cú pháp.
 Nhận số giây hoặc đơn vị `s`/`m`/`h`, từ 1 giây đến 24 giờ. Đây là thời gian xóa **tin tự trả
 lời AFK**, không phải thời gian tắt AFK hay xóa tin lệnh của bạn.
-Tin thường không mention/reply, tin từ bot và tin của chính bạn không kích hoạt.
+Tin trong nhóm không mention/reply, tin từ bot, tin đăng nhập Telegram và tin của chính bạn không kích hoạt.
 `.on` tắt AFK và xóa chính tin lệnh; không đổi trạng thái online Telegram.
 AFK chỉ lưu trong lần chạy hiện tại, không tự thay tên/bio hay tạm dừng Profile Updater.
 
 `.ping` sửa chính tin lệnh để hiện độ trễ gửi/sửa tin qua Telegram và uptime của tiến trình.
-Thêm hostname/IP để chạy một gói ping hệ thống (timeout 5 giây), không dùng raw socket hay
+Mặc định còn chạy một gói ping **google.com**. Gửi `.ping youtube.com` thì ping **youtube.com
+thay cho google.com**, không chạy cả hai. Nhận hostname/IP, timeout 5 giây; không dùng raw socket hay
 thư viện `ping3`. Trên Termux, nếu chưa có lệnh ping: `pkg install iputils`.
 Helper Bot nhận `/afk`, `/on`, `/ping` từ admin; bật AFK cần Userbot đang chạy.
 
-### Tra IP/tên miền và tải link file
+### Log vào chat/kênh, bảng inline ✅/❌
+
+Tại chat/kênh muốn nhận log, tự gửi **`.loghere`**. Cần tài khoản Userbot có quyền gửi tin ở
+đích đó. **`.unloghere`** tắt log khi gọi tại đúng đích hiện tại. Cấu hình được lưu vào `.env`
+và vẫn còn sau restart; `/reset` xóa cả đích log. Nên dùng kênh/nhóm riêng của bạn, không
+chọn nơi có người không nên xem thông tin AFK.
+
+**Bảng có nút inline**, không bắt tài khoản cá nhân tự tạo `Button.inline()`:
+
+1. Cấu hình Helper Bot và bật **`/setinline`** cho bot đó trong BotFather.
+2. Userbot dùng `inline_query` rồi gửi kết quả tại chat log: tin hiện **`via @HelperBot`**.
+   Bot không cần là thành viên chat log để gửi kết quả theo cách này; chat phải cho dùng inline bot.
+3. Nếu inline mode chưa bật hoặc chat không cho dùng, Helper Bot thử gửi trực tiếp tại đích;
+   nếu không có quyền, gửi bảng riêng cho `ADMIN_ID` (admin cần nhấn Start trước).
+4. Bấm **✅ bật / ❌ tắt** từng mục. Bấm tiếp chỉ sửa chính bảng đó, không gửi liên tục bảng mới.
+   Chỉ `ADMIN_ID` và chủ Userbot được thay đổi. Bảng cũ sau khi cấu hình đã đổi sẽ báo mở lại.
+
+Các loại log: `afk`, `error`, `update`, `profile`, `command`. Mặc định bật AFK/lỗi/cập nhật
+code; tên-bio và lệnh là tùy chọn. Log lệnh **chỉ ghi tên lệnh, không ghi tham số**, không ghi
+shell output, OTP, mật khẩu hoặc nội dung tin nhắn riêng. Có thể dùng **`.logconfig`** để mở
+lại bảng hoặc `.logconfig afk,error,profile` để chọn nhanh bằng chữ khi không có Helper Bot.
+
+**AFK + link tin gốc luôn ✅ và bị khóa**, không thể bỏ riêng khỏi các loại log. Có thể bật/tắt
+chi tiết tên chat, người gửi, lý do, thời gian AFK và trạng thái. Kể cả ẩn hết chi tiết,
+link vẫn còn. `.unloghere` hoặc nút cuối bảng tắt **toàn bộ** việc gửi log.
+
+- Link trỏ đến **tin gốc**, không phải auto-reply bị xóa sau 10 giây. Log ghi từng tin AFK hợp
+  lệ, kể cả tin bị cooldown nên không gửi thêm auto-reply.
+- Nhóm/kênh riêng dùng `https://t.me/c/<id>/<message_id>`; chỉ tài khoản có quyền vào đó mở được.
+- Chat 1–1/nhóm cơ bản dùng `tg://openmessage?...&message_id=...`. Đây là deep link phụ thuộc
+  ứng dụng Telegram hỗ trợ, không phải link công khai hoặc cách vượt quyền riêng tư. Phải mở
+  bằng tài khoản đang giữ cuộc trò chuyện/tin nhắn tương ứng.
+- Gửi log im lặng, không có link preview, qua hàng đợi giới hạn 100 tin; lỗi mạng/quyền gửi
+  không làm AFK ngừng hoạt động. Khi nghẽn có thể bỏ log cũ; bảng có số log bị bỏ và lỗi gửi gần nhất.
+
+### Speedtest kế thừa source cũ, không lộ IP trong kết quả
+
+Gửi **`.speedtest`**, **`.sp`**, **`.speetest`** hoặc `.speed`; Helper Bot nhận các alias `/`
+tương ứng. Đo download/upload/ping và hiện ISP/máy chủ, nhưng **IP luôn `hidden`**. Không gửi
+JSON thô, không tạo/gửi ảnh hoặc link chia sẻ Speedtest (ảnh share cũ có thể lộ IP).
+
+Dùng `speedtest-cli` trong subprocess riêng, tối đa **120 giây**, mỗi lúc một phép đo;
+`.cancel`/`/cancel` trong đúng chat/chế độ sẽ hủy và dừng tiến trình thật. Dừng/restart bot cũng
+dọn phép đo. Phép đo dùng băng thông thật và nhà cung cấp vẫn thấy IP kết nối; ẩn IP ở đây là
+ẩn trong **tin kết quả/log**, không phải ẩn danh với máy chủ đo. `python name.py` hoặc updater
+sẽ cài thư viện mới từ `requirements.txt`; không cần ffmpeg/raw socket. Không tự chạy speedtest
+khi bot khởi động. Lệnh `.ip`/`/ip` đã bỏ; `.up`/`/up` không được đăng ký.
+
+### Tra tên miền và tải link file
 
 Đây là nhóm tiện ích được chọn lọc từ source `sth` cũ và viết lại; không mang theo config,
 session, token, cookie hay thư mục downloads cũ. Xem [ghi chú chuyển đổi](docs/legacy-port.md).
 
 ```text
-.ip 1.1.1.1
-.ip 2606:4700:4700::1111
 .whois example.com
 .l https://example.com/file.zip
 .cancel
 ```
 
-- `.ip` nhận IPv4/IPv6 **công khai**, tra qua HTTPS tại `ipwho.is`; vị trí chỉ là ước lượng.
-  Không nhập IP thì chỉ hiện hướng dẫn, không vô tình công khai IP máy chạy bot.
 - `.whois` dùng **RDAP qua rdap.org**, không scrape trang WHOIS cũ. Có ngày đăng ký/hết hạn,
   nhà đăng ký, nameserver và trạng thái nếu registry cung cấp; không hiện liên hệ cá nhân.
   Không phải mọi đuôi tên miền đều có dữ liệu RDAP. Mỗi tra cứu có timeout 15 giây.
@@ -298,15 +346,15 @@ session, token, cookie hay thư mục downloads cũ. Xem [ghi chú chuyển đ�
   nội bộ/loopback/metadata, URL có tài khoản/mật khẩu và redirect hạ HTTPS xuống HTTP.
   Không dùng lệnh này để gửi link chứa token hoặc tài liệu riêng vào nhóm.
 
-Helper Bot có `/ip`, `/whois`, `/l`; mỗi lệnh mở một tin kết quả riêng có **🏠 Home**. Bấm Home
+Helper Bot có `/whois`, `/l`; mỗi lệnh mở một tin kết quả riêng có **🏠 Home**. Bấm Home
 trên tin progress chỉ đổi giao diện tin đó, không tự hủy tải; file vẫn có thể gửi tới sau đó. Muốn dừng thì dùng
-`/cancel`. `/ip` và `/whois` cũng dùng được ở bước chưa nhập API; `/l` cần Helper đầy đủ.
-Không thêm thư viện ngoài `requirements.txt` hiện tại; không thay đổi `.music` Last.fm.
+`/cancel`. `/whois` cũng dùng được ở bước chưa nhập API; `/l` và `/sp` cần Helper đầy đủ.
+Không thay đổi `.music` Last.fm.
 
 ### Helper Bot ít thông báo
 
 **Mỗi lần gõ lệnh `/...` sẽ tạo một tin kết quả mới**, không ghi đè kết quả lệnh trước.
-Ví dụ `/status`, `/settings`, `/ping`, `/ip`, `/whois`, `/l`, `/updatecheck` và `/home` đều có
+Ví dụ `/status`, `/settings`, `/ping`, `/sp`, `/whois`, `/l`, `/updatecheck` và `/home` đều có
 tin riêng. Nếu có tiến trình như ping/tải/cập nhật, bot sửa **chính tin mới của lần gọi đó**,
 không đẩy nhiều tin progress nối tiếp và không sửa tin lệnh của bạn.
 

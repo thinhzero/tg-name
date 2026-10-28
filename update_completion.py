@@ -12,6 +12,7 @@ from html import escape
 from pathlib import Path
 
 from i18n import get_text
+from chat_logging import chat_log
 
 
 STATUS_DIR = ".update-status"
@@ -157,6 +158,7 @@ class UpdateCompletion:
                     inherited = None
                 if isinstance(inherited, dict) and inherited.get("id") == data["id"]:
                     os.environ.pop(NOTICE_ENV, None)
+                chat_log.emit("update", {"action": f"{data['current'][:7]} → {data['latest'][:7]}", "status": "Restart completed"})
                 return True
             except Exception as exc:
                 # Không ảnh hưởng khởi động, không in request/URL/giá trị API.

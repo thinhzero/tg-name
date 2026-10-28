@@ -29,12 +29,16 @@ class LegacyToolsHandlerTests(unittest.IsolatedAsyncioTestCase):
         self.helper, self.bootstrap = helper_bot, bot_setup
         self.lookup = AsyncMock()
         self.transfers = SimpleNamespace(run=AsyncMock(), cancel=Mock(return_value=True), close=AsyncMock())
+        self.speeds = SimpleNamespace(run=AsyncMock(), cancel=Mock(return_value=False), close=AsyncMock())
+        self.logs = SimpleNamespace(emit=Mock(return_value=False), command=AsyncMock(), button=AsyncMock(), inline=AsyncMock())
         for patcher in (
             patch.dict(helper_bot.state.config, {"ADMIN_ID": "42", "LANGUAGE": "vi"}),
             patch.object(helper_bot.state, "is_resetting", False),
             patch.object(helper_bot, "lookup_message", self.lookup),
             patch.object(bot_setup, "lookup_message", self.lookup),
             patch.object(helper_bot, "file_transfers", self.transfers),
+            patch.object(helper_bot, "speed_tests", self.speeds),
+            patch.object(helper_bot, "chat_log", self.logs),
             patch.dict(helper_bot.user_sessions, {}, clear=True),
             patch.object(helper_bot, "notify_update_completed", new=AsyncMock(return_value=False)),
         ):
@@ -68,7 +72,7 @@ class LegacyToolsHandlerTests(unittest.IsolatedAsyncioTestCase):
         return event
 
     async def test_userbot_and_full_helper_lookup_commands_route_consistently(self):
-        for command, argument in (("ip", "1.1.1.1"), ("whois", "example.com")):
+        for command, argument in (("whois", "example.com"),):
             event = await self.user_command(f".{command} {argument}")
             self.lookup.assert_awaited_with(command, argument, event.edit, "vi")
             event = self.event(f"/{command}@MyBot {argument}")
@@ -76,7 +80,7 @@ class LegacyToolsHandlerTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(self.lookup.call_args.args[:2], (command, argument))
 
     async def test_helper_tools_are_admin_private_only_and_blocked_during_reset(self):
-        for name, text in (("lookup_cmd", "/ip 1.1.1.1"), ("link_transfer_cmd", "/l https://example.com/file")):
+        for name, text in (("lookup_cmd", "/whois example.com"), ("link_transfer_cmd", "/l https://example.com/file")):
             for event in (self.event(text, sender=99), self.event(text, private=False)):
                 await self.helper_command(name, event)
             with patch.object(self.helper.state, "is_resetting", True):
@@ -111,6 +115,46 @@ class LegacyToolsHandlerTests(unittest.IsolatedAsyncioTestCase):
         self.transfers.cancel.reset_mock()
         await self.helper_command("cancel_cmd", self.event("/cancel@MyBot"))
         self.transfers.cancel.assert_called_once_with(42, 42)
+        self.speeds.cancel.assert_any_call(42, 42, userbot=True)
+        self.speeds.cancel.assert_any_call(42, 42)
+
+    async def test_speedtest_aliases_route_to_the_same_job_for_both_transports(self):
+        for alias in ("speedtest", "speetest", "speed", "sp"):
+            await self.user_command("." + alias)
+            self.assertTrue(self.speeds.run.call_args.kwargs["userbot"])
+            await self.helper_command("speedtest_cmd", self.event("/" + alias + "@MyBot"))
+            self.assertEqual(self.speeds.run.call_args.kwargs["chat_id"], 42)
+        self.assertEqual(self.speeds.run.await_count, 8)
+
+    async def test_speedtest_is_admin_private_only_and_blocked_during_reset(self):
+        for event in (self.event("/sp", sender=99), self.event("/sp", private=False)):
+            await self.helper_command("speedtest_cmd", event)
+        with patch.object(self.helper.state, "is_resetting", True):
+            await self.helper_command("speedtest_cmd", self.event("/sp"))
+        self.speeds.run.assert_not_awaited()
+
+    async def test_log_commands_are_owner_outgoing_commands_and_preserve_current_chat(self):
+        for text in (".loghere", ".unloghere", ".logconfig", ".logtypes error,update"):
+            await self.user_command(text)
+        self.assertEqual(self.logs.command.await_count, 4)
+        self.assertEqual(self.logs.command.call_args.args[1:3], ("logtypes", "error,update"))
+
+    async def test_only_log_settings_callbacks_can_pass_the_group_guard(self):
+        event = self.event("", private=False)
+        event.message_id = 800
+        event.data = b"logcfg:nonce:cat_profile"
+        await self.client.handlers["private_chat_only"][0](event)
+        with self.assertRaises(self.helper.events.StopPropagation):
+            await self.client.handlers["log_settings_callback"][0](event)
+        self.logs.button.assert_awaited_once_with(event, self.helper.state)
+        event.data = b"main_menu"
+        with self.assertRaises(self.helper.events.StopPropagation):
+            await self.client.handlers["private_chat_only"][0](event)
+
+    async def test_command_logs_never_include_arguments(self):
+        await self.user_command(".whois example.com?private-api-key")
+        self.logs.emit.assert_called_with("command", {"command": ".whois"})
+        self.assertNotIn("private-api-key", str(self.logs.emit.call_args_list))
 
     async def test_full_helper_commands_do_not_get_saved_as_dialog_input(self):
         session = {"action": "input_name"}
@@ -145,7 +189,7 @@ class LegacyToolsHandlerTests(unittest.IsolatedAsyncioTestCase):
         setup = self.bootstrap.BotAPISetup(Mock(), "fake-token", "42")
         setup.call = AsyncMock()
         setup.action = "api_id"
-        for command in ("/ip 1.1.1.1", "/whois@MyBot example.com"):
+        for command in ("/whois example.com", "/whois@MyBot example.com"):
             await setup.handle({"message": {"date": setup.started_at, "from": {"id": 42}, "chat": {"id": 42, "type": "private"}, "text": command}})
             self.assertEqual(setup.action, "api_id")
         self.assertEqual(self.lookup.await_count, 2)
@@ -157,7 +201,11 @@ class LegacyToolsHandlerTests(unittest.IsolatedAsyncioTestCase):
             self.assertIsNone(self.client.handlers[name][1].pattern(text))
         from bot_commands import command_menu
         names = {item["command"] for item in command_menu()}
-        self.assertTrue({"ip", "whois", "l"} <= names)
+        self.assertTrue({"whois", "l", "speedtest", "sp"} <= names)
+        self.assertNotIn("ip", names)
+        self.assertNotIn("up", names)
+        self.assertIsNone(self.user.handlers["userbot_command_handler"][1].pattern(".ip 1.1.1.1"))
+        self.assertIsNone(self.user.handlers["userbot_command_handler"][1].pattern(".up https://example.com/file"))
         self.assertNotIn("l", {item["command"] for item in command_menu(bootstrap=True)})
 
 

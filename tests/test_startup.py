@@ -30,6 +30,9 @@ class StartupTests(unittest.TestCase):
                 self.assertTrue(startup.ensure_dependencies())
         run.assert_not_called()
 
+    def test_speedtest_dependency_is_checked_by_the_one_command_launcher(self):
+        self.assertEqual(startup.DEPENDENCIES["speedtest"], "speedtest-cli")
+
     def test_missing_libraries_are_installed_in_current_virtualenv(self):
         with patch.object(startup, "missing_dependencies", side_effect=[["Telethon"], []]):
             with patch.object(startup.importlib.util, "find_spec", return_value=object()):

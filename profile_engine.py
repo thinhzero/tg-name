@@ -16,6 +16,7 @@ from telethon.errors import FloodWaitError, AboutTooLongError
 from updater_state import state, DEFAULT_NAME_FORMAT
 from random_names import random_names
 from bot_updater import notify_update_completed
+from chat_logging import chat_log
 
 def get_weather_icon(desc: str) -> str:
     d = (desc or "").lower()
@@ -513,6 +514,7 @@ class ProfileEngine:
 
             self.is_running = True
             state.is_running = True
+            chat_log.bind(self.user_client, lambda: state.config)
             state._force_update_event = asyncio.Event()
             self.updater_task = asyncio.create_task(self._loop())
             print(f"[🚀] Profile Updater đã khởi động thành công cho tài khoản: {state.account_name} ({state.account_id})")
@@ -534,8 +536,11 @@ class ProfileEngine:
         """Dừng tiến trình cập nhật profile"""
         from presence import presence
         from file_transfer import file_transfers
+        from speed_test import speed_tests
+        await speed_tests.close(userbot=True)
         await file_transfers.close(userbot=True)
         await presence.close()
+        await chat_log.close(client=self.user_client)
         if not self.is_running:
             return True, "Tiến trình chưa chạy."
 
@@ -644,8 +649,10 @@ class ProfileEngine:
                         state.last_update_time = now.strftime("%H:%M:%S (%d/%m)")
                         state.update_count += 1
                         state.last_error = ""
+                        chat_log.emit("profile", {"name": new_name, "bio": new_bio})
                         print(f"[✅] {gio} Đã cập nhật | Tên: {new_name} | Bio: {new_bio}")
                     except FloodWaitError as e:
+                        chat_log.emit("error", {"action": "profile", "error": f"FloodWait ({e.seconds}s)"})
                         state.last_error = f"FloodWait ({e.seconds}s)"
                         print(f"[⏳] FloodWait: Chờ {e.seconds} giây...")
                         await asyncio.sleep(e.seconds)
@@ -653,8 +660,10 @@ class ProfileEngine:
                         fallback_bio = f"📍 {city} ⏰ {gio}"
                         await self.user_client(UpdateProfileRequest(first_name=new_name, about=fallback_bio))
                         state.current_bio = fallback_bio
+                        chat_log.emit("profile", {"name": new_name, "bio": fallback_bio})
                         print(f"[⚠️] Bio quá 70 ký tự, đã rút gọn: {fallback_bio}")
                     except Exception as e:
+                        chat_log.emit("error", {"action": "profile", "error": type(e).__name__})
                         state.last_error = str(e)
                         print(f"[❌] Lỗi cập nhật profile: {e}")
 
@@ -674,6 +683,7 @@ class ProfileEngine:
             except asyncio.CancelledError:
                 break
             except Exception as e:
+                chat_log.emit("error", {"action": "profile loop", "error": type(e).__name__})
                 state.last_error = str(e)
                 print(f"[❌] Lỗi vòng lặp: {e}")
                 await asyncio.sleep(5)

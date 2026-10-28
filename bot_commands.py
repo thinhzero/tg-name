@@ -14,8 +14,9 @@ COMMANDS = (
     ("update", "Cập nhật tên và bio ngay", "Update your name and bio now"),
     ("updatecheck", "Đếm commit GitHub, hỏi trước khi cập nhật", "Check GitHub commits; ask before updating"),
     ("shell", "Chạy lệnh Linux/Termux, VD: /shell ls -la", "Run Linux/Termux commands, e.g. /shell ls -la"),
-    ("ping", "Độ trễ Telegram, uptime; có thể thêm host", "Telegram latency and uptime; optional host"),
-    ("ip", "Tra IP công khai: /ip 1.1.1.1", "Look up a public IP: /ip 1.1.1.1"),
+    ("ping", "Độ trễ Telegram + ping google.com hoặc host bạn nhập", "Telegram latency + ping google.com or your chosen host"),
+    ("speedtest", "Đo mạng, ẩn IP; alias /sp", "Test network speed, hide IP; alias /sp"),
+    ("sp", "Đo tốc độ mạng, ẩn IP", "Test network speed without showing IP"),
     ("whois", "Tra tên miền: /whois example.com", "Look up a domain: /whois example.com"),
     ("l", "Tải link trực tiếp lên Telegram; tối đa 100 MiB", "Send a direct download to Telegram; max 100 MiB"),
     ("afk", "Bật AFK: /afk [10s] [lý do]; tự xóa trả lời", "Enable AFK: /afk [10s] [reason]; auto-delete replies"),
@@ -36,9 +37,9 @@ COMMANDS = (
     ("rmrandom", "Xóa random bằng UID", "Remove a random entry by UID"),
     ("lang", "Đổi ngôn ngữ: /lang vi hoặc /lang en", "Change language: /lang vi or /lang en"),
     ("reset", "Đặt lại cấu hình, cần xác nhận", "Reset settings, with confirmation"),
-    ("cancel", "Hủy bước nhập hoặc tác vụ tải file", "Cancel input or the current file transfer"),
+    ("cancel", "Hủy bước nhập, tải file hoặc speedtest", "Cancel input, file transfer or speedtest"),
 )
-SETUP_COMMANDS = {"start", "home", "setup", "updatecheck", "shell", "ping", "ip", "whois", "reset", "cancel"}
+SETUP_COMMANDS = {"start", "home", "setup", "updatecheck", "shell", "ping", "whois", "reset", "cancel"}
 
 
 def command_menu(lang="vi", bootstrap=False):

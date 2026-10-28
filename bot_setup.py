@@ -249,7 +249,7 @@ class BotAPISetup:
         if text.startswith("/") and command != "/shell":
             # Chỉ lần gọi lệnh mới mở tin mới; các bước progress sau vẫn sửa tin đó.
             self.panel_message_id = None
-        if command in ("/ip", "/whois"):
+        if command == "/whois":
             parts = text.split(maxsplit=1)
             await lookup_message(command[1:], parts[1] if len(parts) > 1 else "", self.update_edit, state.config.get("LANGUAGE", "vi"))
             return False

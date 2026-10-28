@@ -56,6 +56,14 @@ class ResetStorageTests(unittest.TestCase):
         if os.name == "posix":
             self.assertEqual(stat.S_IMODE(self.env.stat().st_mode), 0o600)
 
+    def test_log_settings_persist_without_credentials_and_reset_disables_destination(self):
+        self.state.update_config({"LOG_CHAT_ID": "-1000000000123", "LOG_TYPES": "afk,profile", "LOG_AFK_FIELDS": "-"})
+        self.assertEqual(self.state.config["LOG_CHAT_ID"], "-1000000000123")
+        self.assertEqual(self.state.config["LOG_AFK_FIELDS"], "-")
+        self.state.reset_config()
+        self.assertEqual(self.state.config["LOG_CHAT_ID"], "")
+        self.assertNotIn("LOG_CHAT_ID", self.module.dotenv_values(self.env))
+
     def test_keys_previously_loaded_from_env_are_also_cleared(self):
         self.env.write_text('BOT_TOKEN="fake-bot-token"\nADMIN_ID="42"\n')
         self.state.reload_config()
