@@ -1,6 +1,8 @@
 """AFK/on và ping: không thêm thư viện, không đăng ký handler trùng."""
 
 import asyncio
+import ipaddress
+import os
 import re
 import shutil
 import time
@@ -8,7 +10,6 @@ from collections import OrderedDict
 from html import escape
 
 from i18n import get_text
-from shell_commands import clipped_html
 from chat_logging import chat_log
 
 
@@ -155,9 +156,14 @@ async def ping_message(target, edit, lang="vi"):
                     executable, "-c", "1", "-W", "2", target,
                     stdin=asyncio.subprocess.DEVNULL,
                     stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.STDOUT,
+                    env={**os.environ, "LC_ALL": "C"},
                 )
                 data, _ = await asyncio.wait_for(process.communicate(), timeout=5)
-                output = data.decode("utf-8", errors="replace")[:4096]
+                # Chỉ lấy số độ trễ, tuyệt đối không gửi stdout/stderr chứa IP.
+                raw = data.decode("utf-8", errors="replace")[:4096]
+                match = re.search(r"\btime\s*([=<])\s*([0-9]{1,8}(?:\.[0-9]{1,6})?)\s*ms\b", raw)
+                output = (f"RTT: {match[1]}{match[2]} ms" if process.returncode == 0 and match
+                          else get_text("ping_failed", lang))
             except asyncio.CancelledError:
                 raise
             except (OSError, asyncio.TimeoutError):
@@ -171,8 +177,13 @@ async def ping_message(target, edit, lang="vi"):
                     await process.communicate()
     text = get_text("ping_result", lang, latency=f"{latency:.2f}", uptime=elapsed(time.monotonic() - STARTED_AT))
     if target:
-        output, _ = clipped_html(output or get_text("ping_failed", lang), 2200)
-        text += f"\n🌐 <code>{escape(target)}</code>\n<pre>{output}</pre>"
+        try:
+            ipaddress.ip_address(target)
+            label = "hidden"
+        except ValueError:
+            # Che cả địa chỉ nhúng trong hostname do người dùng nhập.
+            label = "hidden" if re.search(r"(?:\d{1,3}\.){3}\d{1,3}|:", target) else target
+        text += f"\n🌐 <code>{escape(label)}</code>\n<pre>{escape(output or get_text('ping_failed', lang))}</pre>\n🔒 IP: <code>hidden</code>"
     await edit(text, parse_mode="html")
 
 

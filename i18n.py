@@ -25,6 +25,10 @@ MONTHS = {
 }
 
 TEXTS: Dict[str, Dict[str, str]] = {
+    "profile_name_hint": {
+        "vi": "Tên = BASE_NAME cố định; Họ = hậu tố của NAME_FORMAT (giờ, GMT, random…). Mỗi ô tối đa 64 ký tự.",
+        "en": "First name = fixed BASE_NAME; last name = NAME_FORMAT suffix (time, GMT, random…). Each field supports up to 64 characters."
+    },
     "log_event_afk": {"vi": "😴 <b>AFK · Tin nhắn khi vắng mặt</b>", "en": "😴 <b>AFK · Message while away</b>"},
     "log_event_error": {"vi": "❌ <b>Lỗi</b>", "en": "❌ <b>Error</b>"},
     "log_event_update": {"vi": "🔄 <b>Cập nhật code</b>", "en": "🔄 <b>Code update</b>"},
@@ -373,8 +377,8 @@ TEXTS: Dict[str, Dict[str, str]] = {
         "en": "🔑 Login Telegram"
     },
     "btn_set_name": {
-        "vi": "✏️ Đổi Tên (BASE_NAME)",
-        "en": "✏️ Change Name (BASE_NAME)"
+        "vi": "✏️ Tên · BASE_NAME",
+        "en": "✏️ First name · BASE_NAME"
     },
     "btn_set_city": {
         "vi": "📍 Đổi Thành phố",

@@ -223,14 +223,37 @@ class PingTests(unittest.IsolatedAsyncioTestCase):
             await ping_message("example.com", edit)
         self.assertIn("pkg install iputils", edit.call_args.args[0])
 
-    async def test_ping_uses_argv_and_escapes_output(self):
+    async def test_ping_uses_argv_and_omits_raw_output_and_ip(self):
         edit = AsyncMock()
         process = SimpleNamespace(returncode=0, communicate=AsyncMock(return_value=(b"<reply>&", None)))
         with patch("presence.shutil.which", return_value="/termux/usr/bin/ping"):
             with patch("presence.asyncio.create_subprocess_exec", new=AsyncMock(return_value=process)) as create:
                 await ping_message("::1", edit)
         self.assertEqual(create.call_args.args, ("/termux/usr/bin/ping", "-c", "1", "-W", "2", "::1"))
-        self.assertIn("&lt;reply&gt;&amp;", edit.call_args.args[0])
+        self.assertNotIn("reply", edit.call_args.args[0])
+        self.assertNotIn("::1", edit.call_args.args[0])
+        self.assertIn("hidden", edit.call_args.args[0])
+
+    async def test_only_numeric_rtt_is_exposed_for_ipv4_and_ipv6(self):
+        for address in ("198.51.100.42", "2001:db8::42"):
+            for lang in ("vi", "en"):
+                edit = AsyncMock()
+                raw = f"PING example.com ({address})\n64 bytes from {address}: icmp_seq=1 ttl=55 time=12.34 ms\nprivate diagnostic"
+                process = SimpleNamespace(returncode=0, communicate=AsyncMock(return_value=(raw.encode(), None)))
+                with patch("presence.shutil.which", return_value="/ping"), patch("presence.asyncio.create_subprocess_exec", new=AsyncMock(return_value=process)):
+                    await ping_message(address, edit, lang)
+                self.assertIn("12.34 ms", edit.call_args.args[0])
+                for call in edit.call_args_list:
+                    self.assertNotIn(address, call.args[0])
+                    self.assertNotIn("private diagnostic", call.args[0])
+
+    async def test_failed_ping_never_echoes_diagnostics_or_fake_latency(self):
+        edit = AsyncMock()
+        process = SimpleNamespace(returncode=1, communicate=AsyncMock(return_value=(b"From 198.51.100.42 private time=1 ms", None)))
+        with patch("presence.shutil.which", return_value="/ping"), patch("presence.asyncio.create_subprocess_exec", new=AsyncMock(return_value=process)):
+            await ping_message("example.com", edit)
+        self.assertNotIn("198.51.100.42", edit.call_args.args[0])
+        self.assertNotIn("RTT:", edit.call_args.args[0])
 
     async def test_explicit_ping_host_replaces_google_instead_of_adding_a_second_ping(self):
         process = SimpleNamespace(returncode=0, communicate=AsyncMock(return_value=(b"target reply", None)))

@@ -6,6 +6,11 @@ Chạy bằng **tài khoản Telegram của bạn** để cập nhật tên/bio 
 HzzMonet | 11:35 - 25/10 | GMT +7 | eat29
 ```
 
+Tên được tách thành hai ô Telegram: **Tên (first name)** = `HzzMonet` (BASE_NAME),
+**Họ (last name)** = `| 11:35 - 25/10 | GMT +7 | eat29`. Mỗi ô tối đa 64 ký tự.
+Bot ghi cả hai ô, nên họ cũ được thay thế; mẫu chỉ có `{base_name}` sẽ xóa ô Họ.
+Mẫu không có `{base_name}` được dùng làm toàn bộ hậu tố trong ô Họ.
+
 `eat29` được chọn ngẫu nhiên từ các dòng trong `name.txt`. Có thể thêm thời tiết, nhạc Last.fm
 và một Helper Bot riêng để điều khiển bằng nút bấm. **Helper Bot là tùy chọn.**
 
@@ -270,7 +275,10 @@ AFK chỉ lưu trong lần chạy hiện tại, không tự thay tên/bio hay t�
 `.ping` sửa chính tin lệnh để hiện độ trễ gửi/sửa tin qua Telegram và uptime của tiến trình.
 Mặc định còn chạy một gói ping **google.com**. Gửi `.ping youtube.com` thì ping **youtube.com
 thay cho google.com**, không chạy cả hai. Nhận hostname/IP, timeout 5 giây; không dùng raw socket hay
-thư viện `ping3`. Trên Termux, nếu chưa có lệnh ping: `pkg install iputils`.
+thư viện `ping3`. Kết quả chỉ gồm RTT, độ trễ Telegram và uptime; **không gửi stdout/stderr
+thô, IP đích hay IP được DNS phân giải**, kể cả khi lỗi. Nếu nhập IP, nhãn đích là `hidden`.
+Đây là ẩn IP trong kết quả bot, không phải ẩn danh với máy chủ mạng.
+Trên Termux, nếu chưa có lệnh ping: `pkg install iputils`.
 Helper Bot nhận `/afk`, `/on`, `/ping` từ admin; bật AFK cần Userbot đang chạy.
 
 ### Log vào chat/kênh, bảng inline ✅/❌
@@ -357,6 +365,8 @@ Không thay đổi `.music` Last.fm.
 Ví dụ `/status`, `/settings`, `/ping`, `/sp`, `/whois`, `/l`, `/updatecheck` và `/home` đều có
 tin riêng. Nếu có tiến trình như ping/tải/cập nhật, bot sửa **chính tin mới của lần gọi đó**,
 không đẩy nhiều tin progress nối tiếp và không sửa tin lệnh của bạn.
+
+**Xem trước** hiển thị riêng Tên/Họ/Bio và giới hạn từng ô; menu chính có nút **Ping · ẩn IP**.
 
 **Bấm nút mới dùng lại tin giao diện đang bấm**: mở menu, cài đặt, xem trước, về **🏠 Home**,
 xác nhận cập nhật/reset và chuyển trang đều sửa đúng tin chứa nút, kể cả đó là một tin cũ.

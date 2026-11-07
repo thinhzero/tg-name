@@ -438,6 +438,33 @@ class HelperPanelHandlerTests(unittest.IsolatedAsyncioTestCase):
         shell_event.reply.assert_awaited_once()
         self.message.edit.assert_awaited_once()
 
+@unittest.skipUnless(HAS_DEPENDENCIES, "Requires helper dependencies")
+class ProfileInterfaceTests(unittest.TestCase):
+    def test_preview_separates_fields_and_escapes_html(self):
+        import helper_bot
+        with patch.dict(helper_bot.state.config, {"BASE_NAME": "<Name>"}), patch.object(helper_bot, "generate_preview", return_value=("<Name> | 12:34", "<bio>&")):
+            for lang in ("vi", "en"):
+                text = helper_bot.format_profile_preview(lang)
+                self.assertIn("<code>&lt;Name&gt;</code> (6/64)", text)
+                self.assertIn("<code>| 12:34</code> (7/64)", text)
+                self.assertIn("&lt;bio&gt;&amp;", text)
+                self.assertNotIn("<Name>", text)
+
+    def test_settings_escape_custom_formats_and_explain_name_fields(self):
+        import helper_bot
+        with patch.dict(helper_bot.state.config, {"BASE_NAME": "<Name>", "NAME_FORMAT": "<suffix>", "BIO_FORMAT": "<bio>"}):
+            for lang in ("vi", "en"):
+                text = helper_bot.format_settings_text(lang)
+                self.assertIn("&lt;Name&gt;", text)
+                self.assertIn("&lt;suffix&gt;", text)
+                self.assertIn("64", text)
+
+    def test_main_keyboard_offers_private_ping(self):
+        import helper_bot
+        for lang in ("vi", "en"):
+            data = [getattr(button, "data", None) or getattr(button.type, "data", None) for row in helper_bot.get_main_keyboard(lang) for button in row]
+            self.assertIn(b"tool_ping", data)
+
 
 if __name__ == "__main__":
     unittest.main()

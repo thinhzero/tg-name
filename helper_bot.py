@@ -276,7 +276,7 @@ def get_main_keyboard(lang: str = None):
         [run_btn, pause_btn],
         [Button.inline(get_text("btn_settings", lang), data="menu_settings"), Button.inline(get_text("btn_language", lang), data="menu_language")],
         [Button.inline(get_text("btn_status", lang), data="status"), Button.inline(get_text("btn_help", lang), data="help")],
-        [Button.inline(get_text("btn_check_updates", lang), data="updatecheck")],
+        [Button.inline("🏓 Ping · IP hidden" if lang == "en" else "🏓 Ping · ẩn IP", data="tool_ping"), Button.inline(get_text("btn_check_updates", lang), data="updatecheck")],
         [Button.inline("🛠 Setup wizard" if lang == "en" else "🛠 Cài đặt từng bước", data="menu_setup"), Button.inline("🎲 Random", data="menu_random")]
     ]
 
@@ -356,10 +356,10 @@ def format_dashboard(lang: str = None):
     else:
         status_line = get_text("status_running", lang)
 
-    account_text = f"{state.account_name} (ID: <code>{state.account_id}</code>)" if state.account_id else get_text("not_logged_in", lang)
+    account_text = f"{escape(state.account_name)} (ID: <code>{state.account_id}</code>)" if state.account_id else get_text("not_logged_in", lang)
     has_session = get_text("has_session", lang) if state.config.get("SESSION_STRING") else get_text("no_session", lang)
     music_label = get_text("field_music", lang)
-    music_line = f"{music_label} {state.current_music}\n" if state.current_music else ""
+    music_line = f"{music_label} {escape(state.current_music)}\n" if state.current_music else ""
     weather_display = state.weather_data.get("weather_full") if state.weather_data else (state.current_weather or get_text("no_info", lang))
     lang_display = "Tiếng Việt 🇻🇳" if lang == "vi" else "English 🇬🇧"
 
@@ -371,17 +371,31 @@ def format_dashboard(lang: str = None):
         f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
         f"{get_text('field_status', lang)} {status_line}\n"
         f"{get_text('field_account', lang)} {account_text} ({has_session})\n"
-        f"{get_text('field_current_name', lang)} <code>{state.current_name or get_text('not_updated', lang)}</code>\n"
-        f"{get_text('field_current_bio', lang)} <code>{state.current_bio or get_text('not_updated', lang)}</code>\n"
+        f"{get_text('field_current_name', lang)} <code>{escape(state.current_name or get_text('not_updated', lang))}</code>\n"
+        f"{get_text('field_current_bio', lang)} <code>{escape(state.current_bio or get_text('not_updated', lang))}</code>\n"
         f"{music_line}"
-        f"{get_text('field_weather', lang)} {weather_display}\n"
-        f"{get_text('field_base_name', lang)} <code>{state.config.get('BASE_NAME')}</code>\n"
-        f"{get_text('field_city', lang)} <code>{state.config.get('CITY')}</code>\n"
-        f"{get_text('field_timezone', lang)} <code>{state.config.get('TIMEZONE')}</code>\n"
+        f"{get_text('field_weather', lang)} {escape(weather_display)}\n"
+        f"{get_text('field_base_name', lang)} <code>{escape(state.config.get('BASE_NAME') or '')}</code>\n"
+        f"{get_text('field_city', lang)} <code>{escape(state.config.get('CITY') or '')}</code>\n"
+        f"{get_text('field_timezone', lang)} <code>{escape(state.config.get('TIMEZONE') or '')}</code>\n"
         f"{get_text('field_language', lang)} <code>{lang_display}</code> (/lang)\n"
-        f"{get_text('field_last_update', lang)} <code>{last_update_str}</code> ({total_str}: {state.update_count})\n"
-        + (f"{get_text('field_last_error', lang)} <code>{state.last_error}</code>\n" if state.last_error else "")
+        f"{get_text('field_last_update', lang)} <code>{escape(last_update_str)}</code> ({total_str}: {state.update_count})\n"
+        + (f"{get_text('field_last_error', lang)} <code>{escape(state.last_error)}</code>\n" if state.last_error else "")
     )
+
+def format_profile_preview(lang="vi"):
+    name, bio = generate_preview()
+    first = (state.config.get("BASE_NAME") or "tên").strip()[:64]
+    last = name[len(first):].strip() if name.startswith(first) else name
+    en = lang == "en"
+    return (
+        f"👁️ <b>{'PROFILE PREVIEW' if en else 'XEM TRƯỚC PROFILE'}</b>\n\n"
+        f"• <b>{'First name' if en else 'Tên'}:</b> <code>{escape(first)}</code> ({len(first)}/64)\n"
+        f"• <b>{'Last name · suffix' if en else 'Họ · hậu tố'}:</b> <code>{escape(last) or '—'}</code> ({len(last)}/64)\n"
+        f"• <b>Bio:</b> <code>{escape(bio)}</code> ({len(bio)}/70)\n\n"
+        + get_text("profile_name_hint", lang)
+    )
+
 
 def format_settings_text(lang: str = None):
     """Nội dung trang Cài đặt"""
@@ -396,14 +410,15 @@ def format_settings_text(lang: str = None):
             f"• <b>Telegram Account:</b> {has_sess}\n"
             f"• <b>API_ID:</b> {secret_status(state.config.get('API_ID'), lang)}\n"
             f"• <b>API_HASH:</b> {secret_status(state.config.get('API_HASH'), lang)}\n"
-            f"• <b>Fixed Name (BASE_NAME):</b> <code>{state.config.get('BASE_NAME')}</code>\n"
-            f"• <b>Last.fm Username:</b> <code>{lastfm_user}</code>\n"
-            f"• <b>City:</b> <code>{state.config.get('CITY')}</code>\n"
+            f"• <b>Fixed Name (BASE_NAME):</b> <code>{escape(state.config.get('BASE_NAME') or '')}</code>\n"
+            f"• <b>Last.fm Username:</b> <code>{escape(lastfm_user)}</code>\n"
+            f"• <b>City:</b> <code>{escape(state.config.get('CITY') or '')}</code>\n"
             f"• <b>Weather Source:</b> {has_weather}\n"
-            f"• <b>Timezone:</b> <code>{state.config.get('TIMEZONE')}</code>\n"
+            f"• <b>Timezone:</b> <code>{escape(state.config.get('TIMEZONE') or '')}</code>\n"
             f"• <b>Language:</b> <code>English 🇬🇧</code> (/lang)\n"
-            f"• <b>NAME_FORMAT:</b> <code>{state.config.get('NAME_FORMAT')}</code>\n"
-            f"• <b>BIO_FORMAT:</b> <code>{state.config.get('BIO_FORMAT')}</code>\n\n"
+            f"• <b>NAME_FORMAT:</b> <code>{escape(state.config.get('NAME_FORMAT') or '')}</code>\n"
+            f"• <b>BIO_FORMAT:</b> <code>{escape(state.config.get('BIO_FORMAT') or '')}</code>\n\n"
+            + get_text("profile_name_hint", lang) + "\n\n"
             f"<i>Tap an option below to configure:</i>"
         )
     else:
@@ -416,14 +431,15 @@ def format_settings_text(lang: str = None):
             f"• <b>Tài khoản Telegram:</b> {has_sess}\n"
             f"• <b>API_ID:</b> {secret_status(state.config.get('API_ID'), lang)}\n"
             f"• <b>API_HASH:</b> {secret_status(state.config.get('API_HASH'), lang)}\n"
-            f"• <b>Tên hiển thị cố định:</b> <code>{state.config.get('BASE_NAME')}</code>\n"
-            f"• <b>Tài khoản Last.fm:</b> <code>{lastfm_user}</code>\n"
-            f"• <b>Tỉnh / Thành phố:</b> <code>{state.config.get('CITY')}</code>\n"
+            f"• <b>Tên hiển thị cố định:</b> <code>{escape(state.config.get('BASE_NAME') or '')}</code>\n"
+            f"• <b>Tài khoản Last.fm:</b> <code>{escape(lastfm_user)}</code>\n"
+            f"• <b>Tỉnh / Thành phố:</b> <code>{escape(state.config.get('CITY') or '')}</code>\n"
             f"• <b>Nguồn Thời tiết:</b> {has_weather}\n"
-            f"• <b>Múi giờ:</b> <code>{state.config.get('TIMEZONE')}</code>\n"
+            f"• <b>Múi giờ:</b> <code>{escape(state.config.get('TIMEZONE') or '')}</code>\n"
             f"• <b>Ngôn ngữ:</b> <code>Tiếng Việt 🇻🇳</code> (/lang)\n"
-            f"• <b>Định dạng Tên:</b> <code>{state.config.get('NAME_FORMAT')}</code>\n"
-            f"• <b>Định dạng Bio:</b> <code>{state.config.get('BIO_FORMAT')}</code>\n\n"
+            f"• <b>Định dạng Tên:</b> <code>{escape(state.config.get('NAME_FORMAT') or '')}</code>\n"
+            f"• <b>Định dạng Bio:</b> <code>{escape(state.config.get('BIO_FORMAT') or '')}</code>\n\n"
+            + get_text("profile_name_hint", lang) + "\n\n"
             f"<i>Bấm vào một mục bên dưới để cấu hình:</i>"
         )
 
@@ -791,17 +807,7 @@ def register_userbot_handlers(client: TelegramClient):
                 await event.edit(format_bio_preview_card(cur_lang), parse_mode="html")
 
         elif cmd == "preview":
-            p_name, p_bio = generate_preview()
-            t_label = "Display Name" if cur_lang == "en" else "Tên"
-            b_label = "Bio" if cur_lang == "en" else "Bio"
-            p_title = "PROFILE PREVIEW" if cur_lang == "en" else "XEM TRƯỚC (PREVIEW) PROFILE"
-            preview_msg = (
-                f"👁️ <b>{p_title}</b>\n"
-                f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
-                f"• <b>{t_label}:</b> <code>{p_name}</code> ({len(p_name)}/64)\n"
-                f"• <b>{b_label}:</b> <code>{p_bio}</code> ({len(p_bio)}/70)\n"
-            )
-            await event.edit(preview_msg, parse_mode="html")
+            await event.edit(format_profile_preview(cur_lang), parse_mode="html")
 
         elif cmd == "weather":
             await event.edit(format_weather_card(), parse_mode="html")
@@ -843,13 +849,13 @@ def register_userbot_handlers(client: TelegramClient):
 
         elif cmd == "music":
             if state.current_music:
-                await event.edit(f"🎧 <b>ĐANG NGHE:</b> {state.current_music}\n• <b>Bài:</b> <code>{state.music_track}</code>\n• <b>Ca sĩ:</b> <code>{state.music_artist}</code>\n• <b>Tổng scrobbles:</b> <code>{state.music_scrobbles}</code>", parse_mode="html")
+                await event.edit(f"🎧 <b>ĐANG NGHE:</b> {escape(state.current_music)}\n• <b>Bài:</b> <code>{state.music_track}</code>\n• <b>Ca sĩ:</b> <code>{state.music_artist}</code>\n• <b>Tổng scrobbles:</b> <code>{state.music_scrobbles}</code>", parse_mode="html")
             else:
                 lastfm_user = state.config.get("LASTFM_USERNAME")
                 if not lastfm_user:
                     await event.edit("⚠️ <i>Chưa cấu hình Last.fm! Gõ</i> <code>.lastfm &lt;username&gt;</code> <i>để kết nối.</i>", parse_mode="html")
                 else:
-                    await event.edit(f"🎵 <i>Không có bài hát nào đang phát trên tài khoản Last.fm:</i> <code>{lastfm_user}</code>", parse_mode="html")
+                    await event.edit(f"🎵 <i>Không có bài hát nào đang phát trên tài khoản Last.fm:</i> <code>{escape(lastfm_user)}</code>", parse_mode="html")
 
         elif cmd == "city":
             if not arg:
@@ -1080,17 +1086,7 @@ def register_bot_handlers(bot_client: TelegramClient):
     async def preview_cmd(event):
         if not is_admin(event.sender_id): return
         lang = state.config.get("LANGUAGE", "vi")
-        p_name, p_bio = generate_preview()
-        t_label = "Display Name" if lang == "en" else "Tên hiển thị"
-        b_label = "Bio" if lang == "en" else "Tiểu sử (Bio)"
-        p_title = "PROFILE PREVIEW" if lang == "en" else "XEM TRƯỚC (PREVIEW) PROFILE"
-        msg = (
-            f"👁️ <b>{p_title}</b>\n"
-            f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
-            f"• <b>{t_label}:</b> <code>{p_name}</code> ({len(p_name)}/64)\n"
-            f"• <b>{b_label}:</b> <code>{p_bio}</code> ({len(p_bio)}/70)\n"
-        )
-        await event.reply(msg, parse_mode="html", buttons=get_main_keyboard(lang))
+        await event.reply(format_profile_preview(lang), parse_mode="html", buttons=get_main_keyboard(lang))
 
     @on(events.NewMessage(pattern=r"^/previewbio(?:@\w+)?$"))
     async def previewbio_cmd(event):
@@ -1307,12 +1303,12 @@ def register_bot_handlers(bot_client: TelegramClient):
                 f"• <b>Trạng thái:</b> {status_text}\n"
                 f"• <b>Bài hát:</b> <code>{state.music_track}</code>\n"
                 f"• <b>Nghệ sĩ:</b> <code>{state.music_artist}</code>\n"
-                f"• <b>Tài khoản:</b> <code>{lastfm_user}</code>\n"
+                f"• <b>Tài khoản:</b> <code>{escape(lastfm_user)}</code>\n"
                 f"• <b>Tổng scrobbles:</b> <code>{state.music_scrobbles}</code>\n"
                 f"• <b>Chuỗi hiển thị:</b> <code>{state.current_music}</code>\n"
             )
         else:
-            msg = f"🎵 <i>Tài khoản Last.fm:</i> <code>{lastfm_user}</code>\n<i>Hiện chưa có bài hát nào đang phát hoặc chưa nhận được dữ liệu. Hãy nghe nhạc trên Spotify/Apple Music và kiểm tra lại!</i>"
+            msg = f"🎵 <i>Tài khoản Last.fm:</i> <code>{escape(lastfm_user)}</code>\n<i>Hiện chưa có bài hát nào đang phát hoặc chưa nhận được dữ liệu. Hãy nghe nhạc trên Spotify/Apple Music và kiểm tra lại!</i>"
         await event.reply(msg, parse_mode="html", buttons=get_main_keyboard())
 
     # ========================================================
@@ -1675,6 +1671,11 @@ def register_bot_handlers(bot_client: TelegramClient):
                 await event.show_pages(pages, int(page))
             await event.answer()
             return
+        if data == "tool_ping":
+            if not event.is_private or state.is_resetting: return
+            await event.answer()
+            await ping_message("", event.edit, lang)
+            return
         if data == "updatecheck":
             if not event.is_private or state.is_resetting: return
             await event.answer()
@@ -1822,17 +1823,7 @@ def register_bot_handlers(bot_client: TelegramClient):
 
         # 7. Xem trước (Preview)
         elif data == "preview":
-            p_name, p_bio = generate_preview()
-            t_label = "Display Name" if lang == "en" else "Tên"
-            b_label = "Bio" if lang == "en" else "Bio"
-            p_title = "PROFILE PREVIEW" if lang == "en" else "XEM TRƯỚC (PREVIEW) PROFILE"
-            preview_msg = (
-                f"👁️ <b>{p_title}</b>\n"
-                f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
-                f"• <b>{t_label}:</b> <code>{p_name}</code> ({len(p_name)}/64)\n"
-                f"• <b>{b_label}:</b> <code>{p_bio}</code> ({len(p_bio)}/70)\n"
-            )
-            await event.respond(preview_msg, parse_mode="html")
+            await event.respond(format_profile_preview(lang), parse_mode="html")
             await event.answer()
 
         # 7b. Xem trước Bio chuyên sâu
@@ -1868,12 +1859,12 @@ def register_bot_handlers(bot_client: TelegramClient):
         # 9. Cài đặt Tên cố định
         elif data == "setup_name":
             begin_user_dialog(event, "input_name")
-            curr = state.config.get("BASE_NAME", "name")
+            curr = escape(state.config.get("BASE_NAME", "tên"))
             if lang == "en":
                 msg = f"✏️ <b>CHANGE FIXED NAME (BASE_NAME)</b>\nCurrent: <code>{curr}</code>\n\n👉 <b>Enter your new name:</b>"
             else:
                 msg = f"✏️ <b>ĐỔI TÊN CỐ ĐỊNH (BASE_NAME)</b>\nHiện tại: <code>{curr}</code>\n\n👉 <b>Nhập tên mới của bạn:</b>"
-            await event.respond(msg, parse_mode="html", buttons=get_cancel_keyboard(lang))
+            await event.respond(msg + "\n\n" + get_text("profile_name_hint", lang), parse_mode="html", buttons=get_cancel_keyboard(lang))
             await event.answer()
 
         # 10. Cài đặt Thành phố
@@ -1979,9 +1970,9 @@ def register_bot_handlers(bot_client: TelegramClient):
                 msg = (
                     f"🎨 <b>CUSTOMIZE NAME & BIO FORMAT</b>\n"
                     f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
-                    f"• <b>NAME_FORMAT:</b> <code>{state.config.get('NAME_FORMAT')}</code>\n"
+                    f"• <b>NAME_FORMAT:</b> <code>{escape(state.config.get('NAME_FORMAT') or '')}</code>\n"
                     f"  👉 Current Name: <code>{p_name}</code>\n"
-                    f"• <b>BIO_FORMAT:</b> <code>{state.config.get('BIO_FORMAT')}</code>\n"
+                    f"• <b>BIO_FORMAT:</b> <code>{escape(state.config.get('BIO_FORMAT') or '')}</code>\n"
                     f"  👉 Current Bio: <code>{p_bio}</code>\n\n"
                     f"<b>Supported tags:</b> <code>HH</code>, <code>mm</code>, <code>ss</code>, <code>DD</code>, <code>MM</code>, <code>YYYY</code>, <code>{{base_name}}</code>, <code>{{day}}</code>, <code>{{city}}</code>, <code>{{weather}}</code>, <code>{{music}}</code>, <code>{{music_or_weather}}</code>, <code>{{track}}</code>, <code>{{artist}}</code>\n\n"
                     f"<i>Select a preset below or enter a custom pattern:</i>"
@@ -1990,9 +1981,9 @@ def register_bot_handlers(bot_client: TelegramClient):
                 msg = (
                     f"🎨 <b>TÙY BIẾN ĐỊNH DẠNG TÊN & BIO</b>\n"
                     f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
-                    f"• <b>NAME_FORMAT:</b> <code>{state.config.get('NAME_FORMAT')}</code>\n"
+                    f"• <b>NAME_FORMAT:</b> <code>{escape(state.config.get('NAME_FORMAT') or '')}</code>\n"
                     f"  👉 Tên hiện tại: <code>{p_name}</code>\n"
-                    f"• <b>BIO_FORMAT:</b> <code>{state.config.get('BIO_FORMAT')}</code>\n"
+                    f"• <b>BIO_FORMAT:</b> <code>{escape(state.config.get('BIO_FORMAT') or '')}</code>\n"
                     f"  👉 Bio hiện tại: <code>{p_bio}</code>\n\n"
                     f"<b>Từ khóa hỗ trợ:</b> <code>HH</code>, <code>mm</code>, <code>ss</code>, <code>DD</code>, <code>MM</code>, <code>YYYY</code>, <code>{{base_name}}</code>, <code>{{thu}}</code>, <code>{{city}}</code>, <code>{{weather}}</code>, <code>{{music}}</code>, <code>{{music_or_weather}}</code>, <code>{{track}}</code>, <code>{{artist}}</code>\n\n"
                     f"<i>Hãy bấm chọn một trong các mẫu bên dưới hoặc tự nhập mẫu riêng:</i>"

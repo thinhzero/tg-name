@@ -63,7 +63,7 @@ class RandomProfileTests(unittest.TestCase):
     def test_name_and_bio_preview_use_the_same_random_entry(self):
         self.names.choose.side_effect = ["eat29", "sleep"]
         name, bio = self.engine.generate_preview({"NAME_FORMAT": "{random}", "BIO_FORMAT": "{random}"})
-        self.assertEqual((name, bio), ("eat29", "eat29"))
+        self.assertEqual((name, bio), ("tên eat29", "eat29"))
         self.names.choose.assert_called_once()
 
     def test_bio_scenarios_share_one_random_choice(self):
@@ -75,10 +75,10 @@ class RandomProfileTests(unittest.TestCase):
         self.names.choose.return_value = ""
         self.assertEqual(self.render("{random}"), "")
 
-    def test_existing_name_length_limit_is_kept(self):
+    def test_name_suffix_length_limit_is_kept(self):
         self.names.choose.return_value = "a" * 100
         name, bio = self.engine.generate_preview({"NAME_FORMAT": "{random}", "BIO_FORMAT": "{random}"})
-        self.assertEqual(len(name), 64)
+        self.assertEqual(name, "tên " + "a" * 64)
         self.assertEqual(len(bio), 70)
 
 

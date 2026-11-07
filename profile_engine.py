@@ -385,6 +385,14 @@ def render_format(template: str, base_name: str, weather, city: str, tz_str: str
     res = re.sub(r"\{(base_name|random)\}", lambda match: values[match.group(1)], res)
     return res.strip()
 
+def render_profile_name(template: str, base_name: str, weather, city: str, tz_str: str, music_info: dict = None, random_text: str = None) -> tuple:
+    """Keep the literal base in first_name and render only the template suffix."""
+    suffix_template = (template or DEFAULT_NAME_FORMAT).replace("{base_name}", "")
+    # render_format treats an empty template as the default, so skip it here.
+    suffix = render_format(suffix_template, base_name, weather, city, tz_str, music_info, random_text) if suffix_template.strip() else ""
+    return base_name[:64], suffix[:64]
+
+
 def generate_preview(config: dict = None) -> tuple:
     """Tạo bản xem trước Name và Bio dựa trên cấu hình hiện tại"""
     cfg = config or state.config
@@ -405,9 +413,8 @@ def generate_preview(config: dict = None) -> tuple:
     }
 
     random_text = random_names.choose() if "{random}" in name_format or "{random}" in bio_format else ""
-    p_name = render_format(name_format, base_name, weather, city, tz_str, music_info, random_text)
-    if len(p_name) > 64:
-        p_name = p_name[:64]
+    first_name, last_name = render_profile_name(name_format, base_name, weather, city, tz_str, music_info, random_text)
+    p_name = " ".join(part for part in (first_name, last_name) if part)
 
     p_bio = render_format(bio_format, base_name, weather, city, tz_str, music_info, random_text)
     if len(p_bio) > 70:
@@ -631,9 +638,8 @@ class ProfileEngine:
                     state.music_scrobbles = music_info.get("scrobbles", "")
 
                 random_text = random_names.choose() if "{random}" in name_format or "{random}" in bio_format else ""
-                new_name = render_format(name_format, base_name, weather_dict, city, current_tz, music_info, random_text)
-                if len(new_name) > 64:
-                    new_name = new_name[:64]
+                first_name, last_name = render_profile_name(name_format, base_name, weather_dict, city, current_tz, music_info, random_text)
+                new_name = " ".join(part for part in (first_name, last_name) if part)
 
                 new_bio = render_format(bio_format, base_name, weather_dict, city, current_tz, music_info, random_text)
                 if len(new_bio) > 70:
@@ -645,7 +651,7 @@ class ProfileEngine:
                 # Cập nhật Profile Telegram
                 if self.user_client and self.user_client.is_connected():
                     try:
-                        await self.user_client(UpdateProfileRequest(first_name=new_name, about=new_bio))
+                        await self.user_client(UpdateProfileRequest(first_name=first_name, last_name=last_name, about=new_bio))
                         state.last_update_time = now.strftime("%H:%M:%S (%d/%m)")
                         state.update_count += 1
                         state.last_error = ""
@@ -658,7 +664,7 @@ class ProfileEngine:
                         await asyncio.sleep(e.seconds)
                     except AboutTooLongError:
                         fallback_bio = f"📍 {city} ⏰ {gio}"
-                        await self.user_client(UpdateProfileRequest(first_name=new_name, about=fallback_bio))
+                        await self.user_client(UpdateProfileRequest(first_name=first_name, last_name=last_name, about=fallback_bio))
                         state.current_bio = fallback_bio
                         chat_log.emit("profile", {"name": new_name, "bio": fallback_bio})
                         print(f"[⚠️] Bio quá 70 ký tự, đã rút gọn: {fallback_bio}")
