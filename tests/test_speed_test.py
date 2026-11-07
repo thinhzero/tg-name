@@ -52,34 +52,6 @@ class SpeedTestTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(self.edit.await_count, 2)
         self.assertIsNone(self.tests.job)
 
-    async def test_success_sends_image_after_result_text(self):
-        from io import BytesIO
-        image = BytesIO(b"png")
-        async def send_image(value):
-            self.assertIs(value, image)
-            self.assertIn("120.00 Mbps", self.edit.call_args.args[0])
-        callback = AsyncMock(side_effect=send_image)
-        with patch("speed_card.speed_card", return_value=image) as render:
-            await self.run_test(send_image=callback)
-        render.assert_called_once_with(json.dumps(self.data))
-        callback.assert_awaited_once_with(image)
-        self.assertTrue(image.closed)
-
-    async def test_image_failure_preserves_successful_text_and_logs_safe_error(self):
-        from io import BytesIO
-        for rendering_fails in (False, True):
-            self.edit.reset_mock()
-            image = BytesIO(b"png")
-            callback = AsyncMock(side_effect=RuntimeError("private-token 203.0.113.44"))
-            with patch("speed_card.speed_card", side_effect=RuntimeError("private-token") if rendering_fails else None, return_value=image), patch.object(speed_test.chat_log, "emit") as emit:
-                await self.run_test(send_image=callback)
-            self.assertEqual(self.edit.await_count, 2)
-            self.assertIn("120.00 Mbps", self.edit.call_args.args[0])
-            emit.assert_called_once_with("error", {"action": "speedtest", "error": "Image delivery failed"})
-            if not rendering_fails:
-                self.assertTrue(image.closed)
-            self.assertIsNone(self.tests.job)
-
     async def test_missing_dependency_does_not_start_a_process(self):
         with patch.object(speed_test.importlib.util, "find_spec", return_value=None):
             await self.run_test()

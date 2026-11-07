@@ -729,7 +729,7 @@ def register_userbot_handlers(client: TelegramClient):
 
         elif cmd in ("speedtest", "speetest", "speed", "sp"):
             if not state.is_resetting:
-                await speed_tests.run(event.edit, owner_id=event.sender_id, chat_id=event.chat_id, userbot=True, lang=cur_lang, secret_values=config_secrets(state.config), send_image=lambda image: client.send_file(event.chat_id, image, silent=True))
+                await speed_tests.run(event.edit, owner_id=event.sender_id, chat_id=event.chat_id, userbot=True, lang=cur_lang, secret_values=config_secrets(state.config))
 
         elif cmd == "whois":
             if not state.is_resetting:
@@ -1067,7 +1067,7 @@ def register_bot_handlers(bot_client: TelegramClient):
     @on(events.NewMessage(pattern=r"^/(?:speedtest|speetest|speed|sp)(?:@\w+)?\s*$"))
     async def speedtest_cmd(event):
         if not is_admin(event.sender_id) or not event.is_private or state.is_resetting: return
-        await speed_tests.run(event.edit, owner_id=event.sender_id, chat_id=event.chat_id, lang=state.config.get("LANGUAGE", "vi"), secret_values=config_secrets(state.config), send_image=lambda image: bot_client.send_file(event.chat_id, image, silent=True))
+        await speed_tests.run(event.edit, owner_id=event.sender_id, chat_id=event.chat_id, lang=state.config.get("LANGUAGE", "vi"), secret_values=config_secrets(state.config))
 
     @on(events.NewMessage(pattern=r"^/l(?:@\w+)?(?:\s+([\s\S]+))?\s*$"))
     async def link_transfer_cmd(event):

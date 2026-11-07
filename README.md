@@ -320,9 +320,7 @@ link vẫn còn. `.unloghere` hoặc nút cuối bảng tắt **toàn bộ** vi�
 
 Gửi **`.speedtest`**, **`.sp`**, **`.speetest`** hoặc `.speed`; Helper Bot nhận các alias `/`
 tương ứng. Đo download/upload/ping và hiện ISP/máy chủ, nhưng **IP luôn `hidden`**. Không gửi
-JSON thô hoặc link/ảnh chia sẻ Speedtest (ảnh share cũ có thể lộ IP). Khi đo thành công,
-bot gửi thêm **ảnh PNG tự tạo tại máy**, chỉ chứa download/upload/ping, không có IP, ISP
-hay tên máy chủ. Ảnh dùng Pillow; nếu gửi ảnh lỗi, kết quả chữ vẫn được giữ.
+JSON thô, ảnh hoặc link chia sẻ Speedtest. Kết quả chỉ hiển thị bằng chữ, không tạo/gửi ảnh.
 
 Dùng `speedtest-cli` trong subprocess riêng, tối đa **120 giây**, mỗi lúc một phép đo;
 `.cancel`/`/cancel` trong đúng chat/chế độ sẽ hủy và dừng tiến trình thật. Dừng/restart bot cũng
