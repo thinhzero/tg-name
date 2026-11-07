@@ -1,6 +1,7 @@
 import asyncio
 import importlib.util
 import json
+import shlex
 import unittest
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
@@ -45,9 +46,39 @@ class SpeedTestTests(unittest.IsolatedAsyncioTestCase):
         for value in ("-m speedtest", "--json", "--secure", "--no-pre-allocate"):
             self.assertIn(value, command)
         self.assertNotIn("--share", command)
+        args = shlex.split(command)
+        self.assertEqual(args[1:5], ["-W", "ignore::DeprecationWarning", "-m", "speedtest"])
         self.assertEqual(self.runner.run.call_args.kwargs["secret_values"], ["private-token"])
         self.assertEqual(self.edit.await_count, 2)
         self.assertIsNone(self.tests.job)
+
+    async def test_success_sends_image_after_result_text(self):
+        from io import BytesIO
+        image = BytesIO(b"png")
+        async def send_image(value):
+            self.assertIs(value, image)
+            self.assertIn("120.00 Mbps", self.edit.call_args.args[0])
+        callback = AsyncMock(side_effect=send_image)
+        with patch("speed_card.speed_card", return_value=image) as render:
+            await self.run_test(send_image=callback)
+        render.assert_called_once_with(json.dumps(self.data))
+        callback.assert_awaited_once_with(image)
+        self.assertTrue(image.closed)
+
+    async def test_image_failure_preserves_successful_text_and_logs_safe_error(self):
+        from io import BytesIO
+        for rendering_fails in (False, True):
+            self.edit.reset_mock()
+            image = BytesIO(b"png")
+            callback = AsyncMock(side_effect=RuntimeError("private-token 203.0.113.44"))
+            with patch("speed_card.speed_card", side_effect=RuntimeError("private-token") if rendering_fails else None, return_value=image), patch.object(speed_test.chat_log, "emit") as emit:
+                await self.run_test(send_image=callback)
+            self.assertEqual(self.edit.await_count, 2)
+            self.assertIn("120.00 Mbps", self.edit.call_args.args[0])
+            emit.assert_called_once_with("error", {"action": "speedtest", "error": "Image delivery failed"})
+            if not rendering_fails:
+                self.assertTrue(image.closed)
+            self.assertIsNone(self.tests.job)
 
     async def test_missing_dependency_does_not_start_a_process(self):
         with patch.object(speed_test.importlib.util, "find_spec", return_value=None):
@@ -63,6 +94,49 @@ class SpeedTestTests(unittest.IsolatedAsyncioTestCase):
             self.assertNotIn("203.0.113.44", str(self.edit.call_args_list))
             self.assertNotIn("private-token", str(self.edit.call_args_list))
             self.assertIsNone(self.tests.job)
+
+    async def test_known_errors_only_emit_fixed_actionable_diagnostics(self):
+        cases = (
+            ("ERROR: HTTP Error 403: Forbidden", "forbidden", "403"),
+            ("Cannot retrieve speedtest configuration", "config", "configuration"),
+            ("Unable to connect to servers to test latency.", "servers", "server"),
+            ("No matched servers: 123", "servers", "server"),
+            ("[SSL: CERTIFICATE_VERIFY_FAILED] certificate verify failed", "tls", "CA certificates"),
+            ("<urlopen error [Errno -3] Temporary failure in name resolution>", "network", "DNS"),
+            ("Cannot retrieve speedtest configuration: HTTP Error 403: Forbidden", "forbidden", "403"),
+            ("Cannot retrieve speedtest configuration: certificate verify failed", "tls", "CA certificates"),
+        )
+        for message, category, hint in cases:
+            for lang in ("vi", "en"):
+                with self.subTest(message=message, lang=lang):
+                    raw = message + " 203.0.113.44 private-token https://private.example/ <script>"
+                    self.runner.run.return_value = ShellResult("internal", raw, 1)
+                    with patch.object(speed_test.chat_log, "emit") as emit:
+                        await self.run_test(lang=lang)
+                    text = self.edit.call_args.args[0]
+                    if lang == "en":
+                        self.assertIn(hint, text)
+                    for secret in ("203.0.113.44", "private-token", "private.example", "<script>"):
+                        self.assertNotIn(secret, text)
+                        self.assertNotIn(secret, str(emit.call_args_list))
+                    emit.assert_called_once_with("error", {"action": "speedtest", "error": category})
+
+    async def test_warning_prefixed_json_fails_closed_without_echoing_warning(self):
+        # Do not scrape arbitrary JSON from merged output: suppress the known
+        # Python warning at its source and reject unexpected output safely.
+        raw = "/private/path:1: DeprecationWarning: datetime.datetime.utcnow() is deprecated\n" + json.dumps(self.data)
+        self.runner.run.return_value = ShellResult("internal", raw, 0)
+        await self.run_test(lang="en")
+        text = self.edit.call_args.args[0]
+        self.assertEqual(text, speed_test.get_text("speed_failed", "en"))
+        self.assertNotIn("private/path", text)
+        self.assertIsNone(self.tests.job)
+
+    async def test_unknown_and_truncated_errors_stay_generic(self):
+        for raw, truncated in (("unknown private-token", False), ("HTTP Error 403: Forbidden", True)):
+            self.runner.run.return_value = ShellResult("internal", raw, 1, truncated=truncated)
+            await self.run_test(lang="en")
+            self.assertEqual(self.edit.call_args.args[0], speed_test.get_text("speed_failed", "en"))
 
     async def test_numeric_fields_reject_nonfinite_negative_and_boolean_values(self):
         for value in (float("nan"), float("inf"), -1, True, "120"):

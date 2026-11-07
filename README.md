@@ -320,14 +320,17 @@ link vẫn còn. `.unloghere` hoặc nút cuối bảng tắt **toàn bộ** vi�
 
 Gửi **`.speedtest`**, **`.sp`**, **`.speetest`** hoặc `.speed`; Helper Bot nhận các alias `/`
 tương ứng. Đo download/upload/ping và hiện ISP/máy chủ, nhưng **IP luôn `hidden`**. Không gửi
-JSON thô, không tạo/gửi ảnh hoặc link chia sẻ Speedtest (ảnh share cũ có thể lộ IP).
+JSON thô hoặc link/ảnh chia sẻ Speedtest (ảnh share cũ có thể lộ IP). Khi đo thành công,
+bot gửi thêm **ảnh PNG tự tạo tại máy**, chỉ chứa download/upload/ping, không có IP, ISP
+hay tên máy chủ. Ảnh dùng Pillow; nếu gửi ảnh lỗi, kết quả chữ vẫn được giữ.
 
 Dùng `speedtest-cli` trong subprocess riêng, tối đa **120 giây**, mỗi lúc một phép đo;
 `.cancel`/`/cancel` trong đúng chat/chế độ sẽ hủy và dừng tiến trình thật. Dừng/restart bot cũng
 dọn phép đo. Phép đo dùng băng thông thật và nhà cung cấp vẫn thấy IP kết nối; ẩn IP ở đây là
 ẩn trong **tin kết quả/log**, không phải ẩn danh với máy chủ đo. `python name.py` hoặc updater
 sẽ cài thư viện mới từ `requirements.txt`; không cần ffmpeg/raw socket. Không tự chạy speedtest
-khi bot khởi động. Lệnh `.ip`/`/ip` đã bỏ; `.up`/`/up` không được đăng ký.
+khi bot khởi động. Python mới được lọc DeprecationWarning để không làm hỏng JSON của CLI;
+lỗi HTTP 403/TLS/DNS/cấu hình/máy chủ có hướng dẫn cố định, không gửi output lỗi thô. Lệnh `.ip`/`/ip` đã bỏ; `.up`/`/up` không được đăng ký.
 
 ### Tra tên miền và tải link file
 

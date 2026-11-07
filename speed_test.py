@@ -26,6 +26,28 @@ def hidden_ips(text):
     return re.sub(r"[0-9a-fA-F:.]*:[0-9a-fA-F:.]+(?:%[A-Za-z0-9_-]+)?", hide, text)
 
 
+# Only fixed, reviewed diagnostics may reach chat or logs; CLI output can contain
+# IP addresses, URLs, credentials, or terminal/HTML control sequences.
+
+
+def speed_failure(output, lang="vi"):
+    """Classify known CLI errors without reflecting any subprocess text."""
+    text = output.lower()
+    if re.search(r"\b(?:http(?: error)?[ :]+403|403 forbidden)\b", text):
+        category = "forbidden"
+    elif any(marker in text for marker in ("certificate verify failed", "certificate_verify_failed", "sslerror", "ssl:", "tls", "certificate has expired")):
+        category = "tls"
+    elif any(marker in text for marker in ("unable to connect to servers", "no matched servers", "no servers found", "failed to retrieve list of speedtest servers", "cannot retrieve speedtest server list")):
+        category = "servers"
+    elif any(marker in text for marker in ("cannot retrieve speedtest configuration", "failed to retrieve speedtest configuration", "could not retrieve speedtest configuration")):
+        category = "config"
+    elif any(marker in text for marker in ("network is unreachable", "name or service not known", "temporary failure in name resolution", "connection refused", "connection reset", "timed out", "getaddrinfo failed", "no route to host", "remote end closed connection")):
+        category = "network"
+    else:
+        return "unknown", get_text("speed_failed", lang)
+    return category, get_text(f"speed_failed_{category}", lang)
+
+
 def speed_result(output, lang="vi"):
     data = json.loads(output)
     values = []
@@ -45,7 +67,7 @@ class SpeedTests:
         self.runner = runner or ShellRunner(timeout=120, max_output=65536)
         self.job = None
 
-    async def run(self, edit, *, owner_id, chat_id, userbot=False, lang="vi", secret_values=()):
+    async def run(self, edit, *, owner_id, chat_id, userbot=False, lang="vi", secret_values=(), send_image=None):
         if self.job is not None:
             await edit(get_text("speed_busy", lang), parse_mode="html")
             return
@@ -56,16 +78,28 @@ class SpeedTests:
         try:
             await edit(get_text("speed_running", lang), parse_mode="html")
             # Không gọi results.share(), không đưa JSON thô hoặc ảnh share vào chat.
-            command = shlex.join([sys.executable, "-m", "speedtest", "--json", "--secure", "--no-pre-allocate"])
+            # ShellRunner merges stderr into stdout. Python 3.12+ datetime
+            # deprecations from speedtest-cli would otherwise corrupt its JSON.
+            command = shlex.join([sys.executable, "-W", "ignore::DeprecationWarning", "-m", "speedtest", "--json", "--secure", "--no-pre-allocate"])
             result = await self.runner.run(command, secret_values=secret_values)
             if result.timed_out:
                 text = get_text("speed_timeout", lang)
             elif result.returncode or result.truncated:
-                text = get_text("speed_failed", lang)
-                chat_log.emit("error", {"action": "speedtest", "error": "Measurement failed"})
+                category, text = speed_failure(result.output, lang) if not result.truncated else ("unknown", get_text("speed_failed", lang))
+                chat_log.emit("error", {"action": "speedtest", "error": category})
             else:
                 text = speed_result(result.output, lang)
             await edit(text, parse_mode="html")
+            if send_image is not None and not (result.timed_out or result.returncode or result.truncated):
+                try:
+                    from speed_card import speed_card
+                    image = await asyncio.to_thread(speed_card, result.output)
+                    try:
+                        await send_image(image)
+                    finally:
+                        image.close()
+                except Exception:
+                    chat_log.emit("error", {"action": "speedtest", "error": "Image delivery failed"})
         except asyncio.CancelledError:
             if not job.cancelled_by_owner:
                 raise

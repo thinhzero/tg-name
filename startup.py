@@ -10,7 +10,7 @@ from pathlib import Path
 
 
 PROJECT_DIR = Path(__file__).resolve().parent
-DEPENDENCIES = {"telethon": "Telethon", "dotenv": "python-dotenv", "aiohttp": "aiohttp", "pytz": "pytz", "speedtest": "speedtest-cli"}
+DEPENDENCIES = {"telethon": "Telethon", "dotenv": "python-dotenv", "aiohttp": "aiohttp", "pytz": "pytz", "speedtest": "speedtest-cli", "PIL": "Pillow"}
 
 
 def missing_dependencies():

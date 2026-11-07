@@ -25,6 +25,12 @@ MONTHS = {
 }
 
 TEXTS: Dict[str, Dict[str, str]] = {
+    "speed_failed_forbidden": {'vi': 'Speedtest bị dịch vụ từ chối (HTTP 403). Hãy thử lại sau hoặc kiểm tra VPN/proxy và mạng ra ngoài.', 'en': 'Speedtest was denied by the service (HTTP 403). Retry later or check your VPN/proxy and outbound network.'},
+    "speed_failed_tls": {'vi': 'Không thể xác minh kết nối TLS của Speedtest. Kiểm tra ngày giờ hệ thống và chứng chỉ CA; không tắt xác minh TLS.', 'en': 'Speedtest could not establish a verified TLS connection. Check the system clock and CA certificates; do not disable TLS verification.'},
+    "speed_failed_config": {'vi': 'Không tải được cấu hình Speedtest. Kiểm tra kết nối ra dịch vụ Speedtest rồi thử lại sau.', 'en': 'Could not retrieve Speedtest configuration. Check connectivity to the Speedtest service and retry later.'},
+    "speed_failed_servers": {'vi': 'Không tìm được máy chủ Speedtest khả dụng. Thử lại sau hoặc kiểm tra tường lửa/VPN/proxy.', 'en': 'No usable Speedtest server was available. Retry later or check your firewall/VPN/proxy.'},
+    "speed_failed_network": {'vi': 'Kết nối mạng của Speedtest thất bại. Kiểm tra DNS, kết nối Internet và tường lửa/proxy rồi thử lại.', 'en': 'Speedtest network connection failed. Check DNS, Internet connectivity and firewall/proxy settings, then retry.'},
+
     "profile_name_hint": {
         "vi": "Tên = BASE_NAME cố định; Họ = hậu tố của NAME_FORMAT (giờ, GMT, random…). Mỗi ô tối đa 64 ký tự.",
         "en": "First name = fixed BASE_NAME; last name = NAME_FORMAT suffix (time, GMT, random…). Each field supports up to 64 characters."
