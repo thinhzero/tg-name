@@ -39,7 +39,7 @@ def format_time(utc_ts: int, timezone: str) -> str:
     except Exception:
         return datetime.fromtimestamp(utc_ts).strftime("%H:%M")
 
-def get_time(timezone: str):
+def get_time(timezone: str, state):
     try:
         tz = pytz.timezone(timezone)
         now = datetime.now(tz)
@@ -52,12 +52,13 @@ def get_time(timezone: str):
         weekdays = ["Thứ Hai", "Thứ Ba", "Thứ Tư", "Thứ Năm", "Thứ Sáu", "Thứ Bảy", "Chủ Nhật"]
     return weekdays[now.weekday()], now.strftime("%d/%m"), now.strftime("%H:%M")
 
-async def get_detailed_weather(city: str, weather_api_key: str, timezone: str, lang: str = None) -> dict:
+async def get_detailed_weather(city: str, weather_api_key: str, timezone: str, state, lang: str = None) -> dict:
     """Lấy thông tin thời tiết chi tiết từ OpenWeatherMap hoặc wttr.in fallback (hỗ trợ vi/en)"""
     import urllib.parse
     lang = lang or state.config.get("LANGUAGE", "vi")
     lang_code = "en" if lang == "en" else "vi"
     feels_label = "Feels like" if lang_code == "en" else "Cảm nhận"
+
 
     # 1. Thử qua OpenWeatherMap nếu có API Key
     if weather_api_key and weather_api_key != "lấy ở openweathermap":
@@ -187,9 +188,9 @@ async def get_detailed_weather(city: str, weather_api_key: str, timezone: str, l
         "formatted": f"📍 {city}"
     }
 
-async def get_weather(city: str, weather_api_key: str, timezone: str) -> str:
+async def get_weather(city: str, weather_api_key: str, timezone: str, state) -> str:
     """Hàm lấy chuỗi thời tiết tương thích ngược"""
-    w = await get_detailed_weather(city, weather_api_key, timezone)
+    w = await get_detailed_weather(city, weather_api_key, timezone, state)
     return w.get("formatted", f"📍 {city}")
 
 async def get_lastfm_track(username: str, api_key: str = "") -> dict:
@@ -473,7 +474,8 @@ def generate_bio_preview(config: dict = None, template: str = None) -> dict:
     }
 
 class ProfileEngine:
-    def __init__(self):
+    def __init__(self, state=None):
+        self.state = state
         self.user_client = None
         self.updater_task = None
         self.is_running = False
@@ -578,7 +580,7 @@ class ProfileEngine:
             tz = pytz.timezone("Asia/Ho_Chi_Minh")
 
         # Lấy thông tin thời tiết ban đầu
-        weather_dict = await get_detailed_weather(state.config.get("CITY"), state.config.get("WEATHER_API"), current_tz)
+        weather_dict = await get_detailed_weather(state.config.get("CITY"), state.config.get("WEATHER_API"), current_tz, state)
         state.weather_data = weather_dict
         state.current_weather = weather_dict.get("formatted", f"📍 {state.config.get('CITY')}")
         state.weather_short = weather_dict.get("weather_short", "")
@@ -607,7 +609,7 @@ class ProfileEngine:
 
                 city = state.config.get("CITY", "Bac Ninh")
                 if now >= next_weather_update or city != last_city:
-                    weather_dict = await get_detailed_weather(city, state.config.get("WEATHER_API"), current_tz)
+                    weather_dict = await get_detailed_weather(city, state.config.get("WEATHER_API"), current_tz, state)
                     state.weather_data = weather_dict
                     state.current_weather = weather_dict.get("formatted", f"📍 {city}")
                     state.weather_short = weather_dict.get("weather_short", "")
@@ -619,7 +621,7 @@ class ProfileEngine:
                     next_weather_update = now + timedelta(hours=1)
                     last_city = city
                 else:
-                    weather_dict = state.weather_data or await get_detailed_weather(city, state.config.get("WEATHER_API"), current_tz)
+                    weather_dict = state.weather_data or await get_detailed_weather(city, state.config.get("WEATHER_API"), current_tz, state)
 
                 base_name = state.config.get("BASE_NAME", "tên")
                 name_format = state.config.get("NAME_FORMAT", DEFAULT_NAME_FORMAT)
@@ -694,4 +696,4 @@ class ProfileEngine:
                 print(f"[❌] Lỗi vòng lặp: {e}")
                 await asyncio.sleep(5)
 
-engine = ProfileEngine()
+engine = ProfileEngine(state)

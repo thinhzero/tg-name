@@ -15,6 +15,7 @@ from html import escape
 from pathlib import Path
 
 from i18n import get_text
+from updater_state import state
 from code_snapshot import SNAPSHOT_DIR, create_snapshot
 from update_completion import STATUS_DIR, UpdateCompletion
 
@@ -86,8 +87,9 @@ def update_buttons(token, lang="vi"):
 
 
 class BotUpdater:
-    def __init__(self, project_dir=PROJECT_DIR):
+    def __init__(self, project_dir=PROJECT_DIR, state=None):
         self.project_dir = Path(project_dir).resolve()
+        self.state = state
         self._lock = asyncio.Lock()
         self._restart_pending = False
         self.restart_event = asyncio.Event()
@@ -281,7 +283,7 @@ class BotUpdater:
         self.restart_event.set()
 
 
-bot_updater = BotUpdater()
+bot_updater = BotUpdater(state=state)
 
 
 async def show_update_error(edit, exc, lang):
